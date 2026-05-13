@@ -29,6 +29,76 @@ export function getHeaders() {
   return h
 }
 
+export async function attendanceGetPeriodLines() {
+  const endpoint = '/API/V4/Attendance/GetPeriodLines'
+  const response = await fetch(
+    `https://${getSchoolUrl()}${endpoint}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(
+        {
+          'request': {
+            'lBound': '2023-01-01T05:46:30Z',
+            'uBound': '2023-06-01T05:46:30Z',
+            'modifiedSinceTimestamp': '2023-08-01T05:46:30Z',
+            'skip': 0,
+            'take': 50,
+          },
+        },
+      ),
+    },
+  )
+
+  console.log(response)
+  const data = await response.text()
+  const d = JSON.parse(data)
+  console.log(d)
+}
+
+export async function attendanceGetStatuses() {
+  const endpoint = '/api/attendance/v3/GetStatuses'
+  const response = await fetch(
+    `https://${getSchoolUrl()}${endpoint}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(
+        {},
+      ),
+    },
+  )
+
+  console.log(response)
+  const data = await response.text()
+  const d = JSON.parse(data)
+  console.log(d)
+}
+
+export async function attendanceGetLines() {
+  const endpoint = '/api/attendance/v3/GetLines'
+  const response = await fetch(
+    `https://${getSchoolUrl()}${endpoint}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(
+        {
+          'lBound': '2026-02-01T00:00:00Z',
+          'uBound': '2026-04-01T00:00:00Z',
+          'modifiedSince': '2016-06-10T00:00:00Z',
+          'sliceType': 30,
+        },
+      ),
+    },
+  )
+
+  console.log(response)
+  const data = await response.text()
+  const d = JSON.parse(data)
+  console.log(d)
+}
+
 export async function getStudents() {
   const endpoint = '/API/V6/Person/GetStudents'
   const response = await fetch(
@@ -88,6 +158,9 @@ export async function makeRequest() {
 }
 
 if (import.meta.main) {
-  getStudents()
-  makeRequest()
+  // getStudents()
+  // makeRequest()
+  // attendanceGetLines()
+  // attendanceGetPeriodLines()
+  attendanceGetStatuses()
 }
