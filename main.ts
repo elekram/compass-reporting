@@ -89,5 +89,5 @@ export async function makeRequest() {
 
 if (import.meta.main) {
   getStudents()
-  // makeRequest()
+  makeRequest()
 }
