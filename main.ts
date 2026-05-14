@@ -69,10 +69,18 @@ export async function attendanceGetStatuses() {
     },
   )
 
-  console.log(response)
+  // console.log(response)
   const data = await response.text()
-  const d = JSON.parse(data)
-  console.log(d)
+  const statusTypes = JSON.parse(data)
+  // console.log(d)
+
+  // console.log(d)
+
+  for (const [_, statuses] of Object.entries(statusTypes)) {
+    for (const status of statuses as any) {
+      console.log(status.name)
+    }
+  }
 }
 
 export async function attendanceGetLines() {
@@ -99,7 +107,32 @@ export async function attendanceGetLines() {
   console.log(d)
 }
 
-export async function getStudents() {
+export async function referenceGetFormGroup() {
+  const endpoint = '/api/reference/v4/GetFormGroups'
+  const response = await fetch(
+    `https://${getSchoolUrl()}${endpoint}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({
+        'request': {
+          'modifiedSinceTimestamp': '2024-01-01T00:00:00Z',
+          'take': 100,
+          'includeArchived': false,
+        },
+      }),
+    },
+  )
+
+  console.log(response)
+
+  const data = await response.text()
+  const studentData = JSON.parse(data)
+
+  console.log(studentData)
+}
+
+export async function personGetStudents() {
   const endpoint = '/API/V6/Person/GetStudents'
   const response = await fetch(
     `https://${getSchoolUrl()}${endpoint}`,
@@ -161,6 +194,7 @@ if (import.meta.main) {
   // getStudents()
   // makeRequest()
   // attendanceGetLines()
-  // attendanceGetPeriodLines()
+  attendanceGetPeriodLines()
   attendanceGetStatuses()
+  // referenceGetFormGroup()
 }
