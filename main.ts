@@ -83,6 +83,33 @@ export async function attendanceGetStatuses() {
   }
 }
 
+export async function attendanceGetPeriodLinesBetweenBounds() {
+  const endpoint = '/API/V4/Attendance/GetPeriodLinesTracking'
+  const response = await fetch(
+    `https://${getSchoolUrl()}${endpoint}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(
+        {
+          'request': {
+            'lBound': '2025-01-01T05:46:30Z',
+            'uBound': '2025-06-01T05:46:30Z',
+            'modifiedSinceTimestamp': '2023-08-01T05:46:30Z',
+            'skip': 0,
+            'take': 50,
+          },
+        },
+      ),
+    },
+  )
+
+  console.log(response)
+  const data = await response.text()
+  const d = JSON.parse(data)
+  console.log(d)
+}
+
 export async function attendanceGetLines() {
   const endpoint = '/api/attendance/v3/GetLines'
   const response = await fetch(
@@ -194,7 +221,8 @@ if (import.meta.main) {
   // getStudents()
   // makeRequest()
   // attendanceGetLines()
-  attendanceGetPeriodLines()
-  attendanceGetStatuses()
+  // attendanceGetPeriodLines()
+  attendanceGetPeriodLinesBetweenBounds()
+  // attendanceGetStatuses()
   // referenceGetFormGroup()
 }
