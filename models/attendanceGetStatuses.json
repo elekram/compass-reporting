@@ -1,0 +1,12 @@
+{
+  "__type": "Status:http://jdlf.com.au/ns/business/api/attendance/v3",
+  "countedAbsence": false,
+  "description": "Student is considered to be attending a normal curriculum class (VIC DoE 'Present In Class' Status)",
+  "name": "Present",
+  "parentSelectable": false,
+  "schoolSystemExportIdentifier": "100",
+  "shortCode": "P",
+  "shortName": "Present",
+  "staffSelectable": false,
+  "statusId": "bd862b1d-1b0c-4d70-aba1-878ae6f4bf18"
+}

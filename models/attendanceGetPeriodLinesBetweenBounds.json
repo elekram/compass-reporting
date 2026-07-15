@@ -1,0 +1,15 @@
+{
+  "__type": "PeriodAttendanceLine:#Jdlf.Compass.Business.API.Public.V4.Attendance.Transport",
+  "campusGuid": null,
+  "compassPersonId": "7a5c443e-bb02-431e-a2f8-32ca2dda567e",
+  "description": "Not Marked",
+  "expectedMinutes": 50,
+  "finish": "2026-02-23T23:30:00Z",
+  "periodCode": "2",
+  "periodLineId": "58a3bbbe-dea6-4b09-976a-c8502bcf915d",
+  "prevalentOverallStatusId": "babef996-5291-4095-9fd6-ee608628b41f",
+  "standardClassShadow": true,
+  "start": "2026-02-23T22:40:00Z",
+  "teachingTime": true,
+  "updatedTimestamp": "2026-01-21T04:09:19Z"
+}
