@@ -11,7 +11,7 @@ const periodLines = await compassApis.attendanceGetPeriodLinesBetweenBounds(
   end,
 )
 const statuses = await compassApis.attendanceGetStatuses()
-const students = await compassApis.getStudentsBasic()
+const students = await compassApis.personGetStudentsBasic()
 
 console.log(assembleAttendanceReport(periodLines, statuses, students))
 
