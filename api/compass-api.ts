@@ -140,6 +140,11 @@ export async function attendanceGetPeriodLinesBetweenBounds(
     lines.push(...parsed.d.data)
     total = parsed.d.total
     skip += take
+    console.log(
+      `attendanceGetPeriodLinesBetweenBounds: fetched ${
+        Math.min(skip, total)
+      }/${total} rows`,
+    )
   }
 
   return lines

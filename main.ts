@@ -1,14 +1,15 @@
 import * as compassApis from './api/compass-api.ts'
 import { assembleAttendanceReport } from './api/compass-api.helpers.ts'
-// import { getAbsCsvPaths, readCsv } from './csv-methods.ts'
+import config from './config/config.ts'
 
 // console.log(await compassApis.attendanceGetLines('2026-02-01', '2026-04-01'))
 
-const start = '2026-02-01'
-const end = '2026-04-01'
+const today = new Date().toISOString().substring(0, 10)
+const currentTerm = config.getCurrentTerm()
+
 const periodLines = await compassApis.attendanceGetPeriodLinesBetweenBounds(
-  start,
-  end,
+  currentTerm.start,
+  today,
 )
 const statuses = await compassApis.attendanceGetStatuses()
 const students = await compassApis.personGetStudentsBasic()
