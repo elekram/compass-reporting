@@ -1,4 +1,3 @@
-// API KEY 784b981c-0c7f-4ebf-b786-f6ca9eca6050
 // import { stringify } from '@std/csv'
 import {
   AttendancePeriodLine,
@@ -43,9 +42,13 @@ export function getSchoolUrl() {
 
 export function getHeaders() {
   const h = new Headers()
+  const key = Deno.env.get('COMPASS_API_KEY')
+  if (!key) {
+    throw new Error('no api key')
+  }
 
   h.append('Content-Type', 'application/json')
-  h.append('CompassApiKey', '784b981c-0c7f-4ebf-b786-f6ca9eca6050')
+  h.append('CompassApiKey', key)
 
   return h
 }

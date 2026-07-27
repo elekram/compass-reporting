@@ -291,4 +291,21 @@ export interface AssembledAttendancePeriodLine extends Omit<PeriodAttendanceLine
   statusShortCode: string | null
   statusSchoolSystemExportIdentifier: string | null
   statusDescription: string | null
+  countedAbsence: boolean | null
+}
+
+// claude: one row per student, aggregated from AssembledAttendancePeriodLine by
+// claude: calculateAttendancePercentages in compass-api.helpers.ts. Only
+// claude: teachingTime periods count toward expectedMinutes/countedAbsenceMinutes —
+// claude: see the conversation on periodCode for why (non-teaching blocks like
+// claude: recess/lunch aren't real instructional time and aren't tracked uniformly
+// claude: across students anyway).
+export interface StudentAttendancePercentage {
+  compassPersonId: string
+  firstName: string | null
+  lastName: string | null
+  yearLevel: string | null
+  expectedMinutes: number
+  countedAbsenceMinutes: number
+  attendancePercentage: number | null
 }

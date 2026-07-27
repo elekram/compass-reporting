@@ -1,0 +1,32 @@
+services:
+  web:
+    image: denoland/deno:2.8.1
+    restart: always
+    ports:
+      - ${PORT1}:443
+    working_dir: /app
+    command: >
+      sh -c "deno task run"
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+  postgres:
+    image: postgres:18.3
+    restart: always
+    ports:
+      - ${PG_PORT}:5432
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    volumes:
+      - pgdata_compassReports:/var/lib/postgresql
+      - ./init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+volumes:
+  pgdata_compassReports:

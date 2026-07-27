@@ -1,5 +1,8 @@
 import * as compassApis from './api/compass-api.ts'
-import { assembleAttendanceReport } from './api/compass-api.helpers.ts'
+import {
+  assembleAttendanceReport,
+  calculateAttendancePercentages,
+} from './api/compass-api.helpers.ts'
 import config from './config/config.ts'
 
 // console.log(await compassApis.attendanceGetLines('2026-02-01', '2026-04-01'))
@@ -14,7 +17,11 @@ const periodLines = await compassApis.attendanceGetPeriodLinesBetweenBounds(
 const statuses = await compassApis.attendanceGetStatuses()
 const students = await compassApis.personGetStudentsBasic()
 
-console.log(assembleAttendanceReport(periodLines, statuses, students))
+const assembledReport = assembleAttendanceReport(periodLines, statuses, students)
+console.log(assembledReport)
+
+const percentages = calculateAttendancePercentages(assembledReport)
+console.log(percentages)
 
 // const csvFilePaths = await getAbsCsvPaths()
 // console.log('Found CSV files:', csvFilePaths)
