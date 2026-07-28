@@ -65,7 +65,7 @@ export interface PeriodAttendanceLine {
   periodCode: string
   periodLineId: string
   prevalentOverallStatusId: string
-  standardClassShadow: boolean
+  standardClassShadow: boolean | null
   start: string
   teachingTime: boolean
   updatedTimestamp: string

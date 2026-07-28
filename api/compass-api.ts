@@ -40,6 +40,33 @@ export function getSchoolUrl() {
   return 'cheltsec-vic.compass.education'
 }
 
+// claude: plain fetch() hangs indefinitely on a dropped connection with no error and
+// claude: no way to recover — seen in practice mid-sync. Timeout + a few retries turns
+// claude: that into a bounded failure instead.
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  retries = 3,
+  timeoutMs = 60000,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    } catch (error) {
+      if (attempt >= retries) {
+        throw error
+      }
+      const backoffMs = 1000 * 2 ** attempt
+      console.log(
+        `fetchWithRetry: attempt ${attempt + 1} failed (${
+          error instanceof Error ? error.message : error
+        }), retrying in ${backoffMs}ms`,
+      )
+      await new Promise((resolve) => setTimeout(resolve, backoffMs))
+    }
+  }
+}
+
 export function getHeaders() {
   const h = new Headers()
   const key = Deno.env.get('COMPASS_API_KEY')
@@ -103,13 +130,16 @@ export async function attendanceGetStatuses(): Promise<
 export async function attendanceGetPeriodLinesBetweenBounds(
   start: string,
   end: string,
+  modifiedSinceTimestamp: string = '2023-08-01T05:46:30Z',
+  onPage?: (page: PeriodAttendanceLine[]) => Promise<void> | void,
+  startSkip = 0,
 ): Promise<
   Array<PeriodAttendanceLine>
 > {
   const endpoint = '/API/V4/Attendance/GetPeriodLinesTracking'
   const take = 1000
   const lines: PeriodAttendanceLine[] = []
-  let skip = 0
+  let skip = startSkip
   let total = Infinity
 
   // claude: skip/take pagination, not cursor-based — the envelope reports "total"
@@ -117,7 +147,7 @@ export async function attendanceGetPeriodLinesBetweenBounds(
   // claude: window in testing, so a full year could mean ~1000 sequential requests;
   // claude: worth checking response time in practice before scheduling this unattended.
   while (skip < total) {
-    const response = await fetch(
+    const response = await fetchWithRetry(
       `https://${getSchoolUrl()}${endpoint}`,
       {
         method: 'POST',
@@ -127,7 +157,7 @@ export async function attendanceGetPeriodLinesBetweenBounds(
             'request': {
               'lBound': `${start}T00:00:00Z`,
               'uBound': `${end}T00:00:00Z`,
-              'modifiedSinceTimestamp': '2023-08-01T05:46:30Z',
+              'modifiedSinceTimestamp': modifiedSinceTimestamp,
               'skip': skip,
               'take': take,
             },
@@ -148,6 +178,9 @@ export async function attendanceGetPeriodLinesBetweenBounds(
         Math.min(skip, total)
       }/${total} rows`,
     )
+    if (onPage) {
+      await onPage(parsed.d.data)
+    }
   }
 
   return lines

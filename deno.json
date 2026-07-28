@@ -1,6 +1,8 @@
 {
   "tasks": {
-    "run": "deno run -A --env-file=./deno.env main.ts"
+    "run": "deno run -A --env-file=./deno.env main.ts",
+    "sync": "deno run -A --env-file=./deno.env sync.ts",
+    "report": "deno run -A --env-file=./deno.env report.ts"
   },
   "fmt": {
     "semiColons": false,
