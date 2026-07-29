@@ -6,52 +6,52 @@
 // claude: still in use by those functions. See PeriodAttendanceLine below for the shape
 // claude: confirmed against the real GetPeriodLinesTracking response.
 export interface AttendancePeriodLine {
-  arrivalTimestamp: string;
-  campusGuid: string;
-  compassPersonId: string;
-  countedAbsenceMinutes: number;
-  departureTimestamp: string;
-  description: string | null;
-  expectedMinutes: number;
-  finish: string;
-  nonCountedAbsenceMinutes: number;
-  "prevalentCountedAbsenceStatusId ": string | null;
-  prevalentNonCountedAbsenceStatusId: string | null;
-  prevalentOverallStatusId: string;
-  "schoolArrivalGapMinutes ": number;
-  "schoolDepartureGapMinutes ": number;
-  sliceCode: string | null;
-  start: string;
-  unmarkedMinutes: number;
-  unscheduledMinutes: number;
-  updatedTimestamp: string;
+  arrivalTimestamp: string
+  campusGuid: string
+  compassPersonId: string
+  countedAbsenceMinutes: number
+  departureTimestamp: string
+  description: string | null
+  expectedMinutes: number
+  finish: string
+  nonCountedAbsenceMinutes: number
+  'prevalentCountedAbsenceStatusId ': string | null
+  prevalentNonCountedAbsenceStatusId: string | null
+  prevalentOverallStatusId: string
+  'schoolArrivalGapMinutes ': number
+  'schoolDepartureGapMinutes ': number
+  sliceCode: string | null
+  start: string
+  unmarkedMinutes: number
+  unscheduledMinutes: number
+  updatedTimestamp: string
 }
 
 export interface AttendancePeriodLineDateObject {
-  arrivalTimestamp: Date;
-  campusGuid: string;
-  compassPersonId: string;
-  countedAbsenceMinutes: number;
-  departureTimestamp: Date;
-  description: string | null;
-  expectedMinutes: number;
-  finish: Date;
-  nonCountedAbsenceMinutes: number;
-  "prevalentCountedAbsenceStatusId ": string | null;
-  prevalentNonCountedAbsenceStatusId: string | null;
-  prevalentOverallStatusId: string;
-  "schoolArrivalGapMinutes ": number;
-  "schoolDepartureGapMinutes ": number;
-  sliceCode: string | null;
-  start: Date;
-  unmarkedMinutes: number;
-  unscheduledMinutes: number;
-  updatedTimestamp: Date;
+  arrivalTimestamp: Date
+  campusGuid: string
+  compassPersonId: string
+  countedAbsenceMinutes: number
+  departureTimestamp: Date
+  description: string | null
+  expectedMinutes: number
+  finish: Date
+  nonCountedAbsenceMinutes: number
+  'prevalentCountedAbsenceStatusId ': string | null
+  prevalentNonCountedAbsenceStatusId: string | null
+  prevalentOverallStatusId: string
+  'schoolArrivalGapMinutes ': number
+  'schoolDepartureGapMinutes ': number
+  sliceCode: string | null
+  start: Date
+  unmarkedMinutes: number
+  unscheduledMinutes: number
+  updatedTimestamp: Date
 }
 
 // A map where the key is a date string (e.g., "2026-02-01")
 // and the value is an array of attendance lines for that day.
-export type GroupedAttendance = Map<string, AttendancePeriodLineDateObject[]>;
+export type GroupedAttendance = Map<string, AttendancePeriodLineDateObject[]>
 
 // claude: based on the actual response from attendanceGetPeriodLinesBetweenBounds
 // claude: (V4/Attendance/GetPeriodLinesTracking), see models/attendanceGetPeriodLinesBetweenBounds.json
@@ -279,7 +279,8 @@ export interface StudentBasic {
 // claude: StudentBasic (joined on compassPersonId) and AttendanceStatus (joined on
 // claude: prevalentOverallStatusId -> statusId). See assembleAttendanceReport
 // claude: in compass-api.helpers.ts.
-export interface AssembledAttendancePeriodLine extends Omit<PeriodAttendanceLine, '__type'> {
+export interface AssembledAttendancePeriodLine
+  extends Omit<PeriodAttendanceLine, '__type'> {
   firstName: string | null
   lastName: string | null
   preferredFirstName: string | null
@@ -296,16 +297,22 @@ export interface AssembledAttendancePeriodLine extends Omit<PeriodAttendanceLine
 
 // claude: one row per student, aggregated from AssembledAttendancePeriodLine by
 // claude: calculateAttendancePercentages in compass-api.helpers.ts. Only
-// claude: teachingTime periods count toward expectedMinutes/countedAbsenceMinutes —
-// claude: see the conversation on periodCode for why (non-teaching blocks like
-// claude: recess/lunch aren't real instructional time and aren't tracked uniformly
-// claude: across students anyway).
+// claude: teachingTime periods count toward expectedMinutes — see the conversation
+// claude: on periodCode for why (non-teaching blocks like recess/lunch aren't real
+// claude: instructional time and aren't tracked uniformly across students anyway).
+// claude: unexplainedAbsenceMinutes only counts the "Unexplained"
+// claude: (schoolSystemExportIdentifier "500") status; explainedAbsenceMinutes
+// claude: counts every other countedAbsence status (medical, suspension, family
+// claude: holiday, etc.) — the two are mutually exclusive and reported separately
+// claude: rather than combined, since only unexplained absence is actionable.
 export interface StudentAttendancePercentage {
   compassPersonId: string
   firstName: string | null
   lastName: string | null
   yearLevel: string | null
   expectedMinutes: number
-  countedAbsenceMinutes: number
+  unexplainedAbsenceMinutes: number
+  explainedAbsenceMinutes: number
   attendancePercentage: number | null
+  explainedAttendancePercentage: number | null
 }

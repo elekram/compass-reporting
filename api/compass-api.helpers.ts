@@ -39,13 +39,18 @@ export function assembleAttendanceReport(
       yearLevel: student?.yearLevel ?? null,
       statusName: status?.name ?? null,
       statusShortCode: status?.shortCode ?? null,
-      statusSchoolSystemExportIdentifier:
-        status?.schoolSystemExportIdentifier ?? null,
+      statusSchoolSystemExportIdentifier: status?.schoolSystemExportIdentifier ?? null,
       statusDescription: status?.description ?? null,
       countedAbsence: status?.countedAbsence ?? null,
     }
   })
 }
+
+// claude: "500" is Compass's schoolSystemExportIdentifier for the "Unexplained"
+// claude: status — the only category the school wants counted here. Other
+// claude: countedAbsence statuses (medical, suspension, family holiday, etc.) are
+// claude: legitimate/excused and deliberately excluded.
+const UNEXPLAINED_STATUS_EXPORT_ID = '500'
 
 // claude: only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
 // claude: aren't tracked uniformly across students (see conversation on periodCode
@@ -68,8 +73,16 @@ export function calculateAttendancePercentages(
       (sum, line) => sum + line.expectedMinutes,
       0,
     )
-    const countedAbsenceMinutes = studentLines
-      .filter((line) => line.countedAbsence)
+    const unexplainedAbsenceMinutes = studentLines
+      .filter((line) =>
+        line.statusSchoolSystemExportIdentifier === UNEXPLAINED_STATUS_EXPORT_ID
+      )
+      .reduce((sum, line) => sum + line.expectedMinutes, 0)
+    const explainedAbsenceMinutes = studentLines
+      .filter((line) =>
+        line.countedAbsence &&
+        line.statusSchoolSystemExportIdentifier !== UNEXPLAINED_STATUS_EXPORT_ID
+      )
       .reduce((sum, line) => sum + line.expectedMinutes, 0)
 
     const { firstName, lastName, yearLevel } = studentLines[0]
@@ -80,10 +93,15 @@ export function calculateAttendancePercentages(
       lastName,
       yearLevel,
       expectedMinutes,
-      countedAbsenceMinutes,
+      unexplainedAbsenceMinutes,
+      explainedAbsenceMinutes,
       attendancePercentage: expectedMinutes === 0
         ? null
-        : Math.round((1 - countedAbsenceMinutes / expectedMinutes) * 1000) /
+        : Math.round((1 - unexplainedAbsenceMinutes / expectedMinutes) * 1000) /
+          10,
+      explainedAttendancePercentage: expectedMinutes === 0
+        ? null
+        : Math.round((1 - explainedAbsenceMinutes / expectedMinutes) * 1000) /
           10,
     }
   })

@@ -1,6 +1,9 @@
 import sql from './db.ts'
-import { attendanceGetPeriodLinesBetweenBounds } from './api/compass-api.ts'
-import { PeriodAttendanceLine } from './api/compass-api.types.ts'
+import {
+  attendanceGetPeriodLinesBetweenBounds,
+  attendanceGetStatuses,
+} from './api/compass-api.ts'
+import { AttendanceStatus, PeriodAttendanceLine } from './api/compass-api.types.ts'
 import config from './config/config.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
@@ -90,7 +93,54 @@ async function upsertPeriodLines(lines: PeriodAttendanceLine[]) {
   `
 }
 
+// claude: statuses is a small, non-paginated reference list (not per-row data like
+// claude: period_lines), so it's just refreshed in full on every sync run rather than
+// claude: tracked incrementally.
+async function upsertStatuses(statuses: AttendanceStatus[]) {
+  const rows = statuses.map((status) => ({
+    status_id: status.statusId,
+    name: status.name,
+    short_code: status.shortCode,
+    short_name: status.shortName,
+    description: status.description,
+    school_system_export_identifier: status.schoolSystemExportIdentifier,
+    counted_absence: status.countedAbsence,
+    parent_selectable: status.parentSelectable,
+    staff_selectable: status.staffSelectable,
+  }))
+
+  await sql`
+    INSERT INTO statuses ${
+    sql(
+      rows,
+      'status_id',
+      'name',
+      'short_code',
+      'short_name',
+      'description',
+      'school_system_export_identifier',
+      'counted_absence',
+      'parent_selectable',
+      'staff_selectable',
+    )
+  }
+    ON CONFLICT (status_id) DO UPDATE SET
+      name = excluded.name,
+      short_code = excluded.short_code,
+      short_name = excluded.short_name,
+      description = excluded.description,
+      school_system_export_identifier = excluded.school_system_export_identifier,
+      counted_absence = excluded.counted_absence,
+      parent_selectable = excluded.parent_selectable,
+      staff_selectable = excluded.staff_selectable
+  `
+}
+
 const today = new Date().toISOString().substring(0, 10)
+
+const statuses = await attendanceGetStatuses()
+await upsertStatuses(statuses)
+console.log(`sync.ts: upserted ${statuses.length} statuses`)
 
 const syncState = await getSyncState()
 

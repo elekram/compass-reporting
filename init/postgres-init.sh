@@ -31,4 +31,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
                 last_synced_timestamp timestamptz NOT NULL,
                 updated_at timestamptz NOT NULL DEFAULT now()
         );
+
+        -- full attendanceGetStatuses reference list, kept in sync so status-based
+        -- filtering (e.g. schoolSystemExportIdentifier = '500' / "Unexplained") can
+        -- happen in SQL instead of a live Compass call at report time
+        CREATE TABLE statuses (
+                status_id text PRIMARY KEY,
+                name text NOT NULL,
+                short_code text NOT NULL,
+                short_name text NOT NULL,
+                description text NOT NULL,
+                school_system_export_identifier text NOT NULL,
+                counted_absence boolean NOT NULL,
+                parent_selectable boolean NOT NULL,
+                staff_selectable boolean NOT NULL
+        );
 EOSQL
