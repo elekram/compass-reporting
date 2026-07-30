@@ -2,6 +2,9 @@ services:
   web:
     image: denoland/deno:2.8.1
     restart: always
+    user: "${HOST_UID}:${HOST_GID}"
+    environment:
+      DENO_DIR: /app/.deno-cache
     ports:
       - ${PORT1}:443
     working_dir: /app
