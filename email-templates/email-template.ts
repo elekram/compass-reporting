@@ -35,13 +35,11 @@ function groupByYearLevel(rows: AbsenceRow[]): Array<[string, AbsenceRow[]]> {
   return orderedKeys.map((key) => [key, groups.get(key)!])
 }
 
-// claude: bands are relative to a "below threshold" list — every row here already
-// claude: fails the 85% cutoff, so the bands exist to differentiate severity within
-// claude: that group rather than to mark threshold pass/fail.
+// claude: bands set by stakeholder request — 85%+ green, 80-85% orange, below 80% red.
 function barColor(percentage: number): string {
-  if (percentage < 60) return '#c0392b'
-  if (percentage < 75) return '#EC9E26'
-  return '#e6b800'
+  if (percentage < 80) return '#c0392b'
+  if (percentage < 85) return '#EC9E26'
+  return '#27ae60'
 }
 
 function renderBar(percentage: number | null): string {
@@ -65,6 +63,16 @@ function renderBar(percentage: number | null): string {
           </table>`
 }
 
+function renderTrend(trend: number | null): string {
+  if (trend === null || trend === 0) {
+    return `<span style='color: #666666;'>&ndash;</span>`
+  }
+  const color = trend > 0 ? '#27ae60' : '#c0392b'
+  const arrow = trend > 0 ? '&#9650;' : '&#9660;'
+  const sign = trend > 0 ? '+' : ''
+  return `<span style='color: ${color};'>${arrow} ${sign}${trend}%</span>`
+}
+
 function renderAbsenceRows(rows: AbsenceRow[]): string {
   return rows.map((row) => `
       <tr>
@@ -77,6 +85,9 @@ function renderAbsenceRows(rows: AbsenceRow[]): string {
         <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
     row.attendancePercentage ?? '-'
   }%</td>
+        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
+    renderTrend(row.trend)
+  }</td>
         <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysAny}</td>
         <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysFull}</td>
       </tr>`).join('')
@@ -97,6 +108,7 @@ function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Name</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747;'>&nbsp;</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Attendance</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Trend</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Days with at least one qualifying period'>Days*</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Full days'>Full Days</td>
                 </tr>
@@ -106,11 +118,7 @@ function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
           </tr>`
 }
 
-function renderAbsenceSection(
-  title: string,
-  rows: AbsenceRow[],
-  threshold: number,
-): string {
+function renderAbsenceSection(title: string, rows: AbsenceRow[]): string {
   const yearTables = groupByYearLevel(rows)
     .map(([yearLevel, groupRows]) => renderYearLevelTable(yearLevel, groupRows))
     .join('')
@@ -119,7 +127,7 @@ function renderAbsenceSection(
           <tr>
             <td class='innerpadding'
               style='padding: 20px 0px 5px 0px; font-family: sans-serif; font-size: 18px; font-weight: bold; color: #283747;'>
-              ${escapeHtml(title)} (${rows.length} below ${threshold}%)
+              ${escapeHtml(title)} (${rows.length} students)
             </td>
           </tr>
           ${
@@ -127,7 +135,7 @@ function renderAbsenceSection(
           <tr>
             <td class='innerpadding'
               style='padding: 0px 0px 8px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
-              Days* = at least one period this term; Full Days = every period that day.
+              Days* = at least one period this term; Full Days = every period that day. Green 85%+, orange 80-85%, red below 80%. Trend compares the last 14 days to the 14 days before that.
             </td>
           </tr>`
   }
@@ -136,7 +144,7 @@ function renderAbsenceSection(
       ? `
           <tr>
             <td class='innerpadding borderbottom' style='padding: 0px 0px 15px 0px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #666666;'>
-              No students below threshold.
+              No students.
             </td>
           </tr>`
       : yearTables
@@ -344,20 +352,8 @@ export default function emailTemplate(data: AttendanceReportData): string {
               ${data.totalStudents} students in total.
             </td>
           </tr>
-          ${
-    renderAbsenceSection(
-      'Unexplained absences',
-      data.unexplainedBelowThreshold,
-      data.threshold,
-    )
-  }
-          ${
-    renderAbsenceSection(
-      'Explained absences',
-      data.explainedBelowThreshold,
-      data.threshold,
-    )
-  }
+          ${renderAbsenceSection('Unexplained absences', data.unexplainedRows)}
+          ${renderAbsenceSection('Explained absences', data.explainedRows)}
           <tr>
           </tr>
         </table>

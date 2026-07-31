@@ -3,36 +3,32 @@ import sql from './db.ts'
 import config from './config/config.ts'
 import { AbsenceRow, getAttendanceReportData } from './attendance-data.ts'
 
-const ATTENDANCE_THRESHOLD = 85
-
 const period = Deno.args.includes('year') ? config.year : config.getCurrentTerm()
-const data = await getAttendanceReportData(period, ATTENDANCE_THRESHOLD)
+const data = await getAttendanceReportData(period)
 
 console.log(
   `${data.periodName} (${data.periodStart} to ${data.periodEnd}), ${data.totalStudents} students`,
 )
 
-console.log(
-  `\nUnexplained absences only: ${data.unexplainedBelowThreshold.length} below ${ATTENDANCE_THRESHOLD}%`,
-)
+console.log(`\nUnexplained absences: ${data.unexplainedRows.length} students`)
 console.table(
-  data.unexplainedBelowThreshold.map((r) => ({
+  data.unexplainedRows.map((r) => ({
     Name: r.name,
     Year: r.yearLevel,
     'Attendance %': r.attendancePercentage,
+    Trend: r.trend,
     'Days*': r.daysAny,
     'Full Days': r.daysFull,
   })),
 )
 
-console.log(
-  `\nExplained absences only: ${data.explainedBelowThreshold.length} below ${ATTENDANCE_THRESHOLD}%`,
-)
+console.log(`\nExplained absences: ${data.explainedRows.length} students`)
 console.table(
-  data.explainedBelowThreshold.map((r) => ({
+  data.explainedRows.map((r) => ({
     Name: r.name,
     Year: r.yearLevel,
     'Attendance %': r.attendancePercentage,
+    Trend: r.trend,
     'Days*': r.daysAny,
     'Full Days': r.daysFull,
   })),
@@ -43,25 +39,24 @@ function toCsvRows(rows: AbsenceRow[]) {
     Name: r.name,
     Year: r.yearLevel ?? '',
     'Attendance %': r.attendancePercentage ?? '',
+    Trend: r.trend ?? '',
     'Days*': r.daysAny,
     'Full Days': r.daysFull,
   }))
 }
 
 await Deno.writeTextFile(
-  'unexplained-absences-below-85.csv',
-  stringify(toCsvRows(data.unexplainedBelowThreshold), {
-    columns: ['Name', 'Year', 'Attendance %', 'Days*', 'Full Days'],
+  'unexplained-absences.csv',
+  stringify(toCsvRows(data.unexplainedRows), {
+    columns: ['Name', 'Year', 'Attendance %', 'Trend', 'Days*', 'Full Days'],
   }),
 )
 await Deno.writeTextFile(
-  'explained-absences-below-85.csv',
-  stringify(toCsvRows(data.explainedBelowThreshold), {
-    columns: ['Name', 'Year', 'Attendance %', 'Days*', 'Full Days'],
+  'explained-absences.csv',
+  stringify(toCsvRows(data.explainedRows), {
+    columns: ['Name', 'Year', 'Attendance %', 'Trend', 'Days*', 'Full Days'],
   }),
 )
-console.log(
-  '\nWrote unexplained-absences-below-85.csv and explained-absences-below-85.csv',
-)
+console.log('\nWrote unexplained-absences.csv and explained-absences.csv')
 
 await sql.end()
