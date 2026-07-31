@@ -35,15 +35,50 @@ function groupByYearLevel(rows: AbsenceRow[]): Array<[string, AbsenceRow[]]> {
   return orderedKeys.map((key) => [key, groups.get(key)!])
 }
 
+// claude: bands are relative to a "below threshold" list — every row here already
+// claude: fails the 85% cutoff, so the bands exist to differentiate severity within
+// claude: that group rather than to mark threshold pass/fail.
+function barColor(percentage: number): string {
+  if (percentage < 60) return '#c0392b'
+  if (percentage < 75) return '#EC9E26'
+  return '#e6b800'
+}
+
+function renderBar(percentage: number | null): string {
+  if (percentage === null) {
+    return ''
+  }
+  const filled = Math.max(0, Math.min(100, Math.round(percentage)))
+  const empty = 100 - filled
+  const color = barColor(filled)
+  return `
+          <table width='120' border='0' cellpadding='0' cellspacing='0' style='border-collapse: collapse;'>
+            <tr>${
+    filled > 0
+      ? `<td width='${filled}%' bgcolor='${color}' style='font-size: 1px; line-height: 10px;'>&nbsp;</td>`
+      : ''
+  }${
+    empty > 0
+      ? `<td width='${empty}%' bgcolor='#f2eeed' style='font-size: 1px; line-height: 10px;'>&nbsp;</td>`
+      : ''
+  }</tr>
+          </table>`
+}
+
 function renderAbsenceRows(rows: AbsenceRow[]): string {
   return rows.map((row) => `
       <tr>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left;'>${
+        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left; width: 40%;'>${
     escapeHtml(row.name)
   }</td>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right;'>${
+        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed;'>${
+    renderBar(row.attendancePercentage)
+  }</td>
+        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
     row.attendancePercentage ?? '-'
   }%</td>
+        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysAny}</td>
+        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysFull}</td>
       </tr>`).join('')
 }
 
@@ -60,7 +95,10 @@ function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
               <table width='100%' border='0' cellspacing='0' cellpadding='0'>
                 <tr>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Name</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747;'>&nbsp;</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Attendance</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Days with at least one qualifying period'>Days*</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Full days'>Full Days</td>
                 </tr>
                 ${renderAbsenceRows(rows)}
               </table>
@@ -84,6 +122,15 @@ function renderAbsenceSection(
               ${escapeHtml(title)} (${rows.length} below ${threshold}%)
             </td>
           </tr>
+          ${
+    rows.length === 0 ? '' : `
+          <tr>
+            <td class='innerpadding'
+              style='padding: 0px 0px 8px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
+              Days* = at least one period this term; Full Days = every period that day.
+            </td>
+          </tr>`
+  }
           ${
     rows.length === 0
       ? `

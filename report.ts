@@ -20,6 +20,8 @@ console.table(
     Name: r.name,
     Year: r.yearLevel,
     'Attendance %': r.attendancePercentage,
+    'Days*': r.daysAny,
+    'Full Days': r.daysFull,
   })),
 )
 
@@ -31,6 +33,8 @@ console.table(
     Name: r.name,
     Year: r.yearLevel,
     'Attendance %': r.attendancePercentage,
+    'Days*': r.daysAny,
+    'Full Days': r.daysFull,
   })),
 )
 
@@ -39,19 +43,21 @@ function toCsvRows(rows: AbsenceRow[]) {
     Name: r.name,
     Year: r.yearLevel ?? '',
     'Attendance %': r.attendancePercentage ?? '',
+    'Days*': r.daysAny,
+    'Full Days': r.daysFull,
   }))
 }
 
 await Deno.writeTextFile(
   'unexplained-absences-below-85.csv',
   stringify(toCsvRows(data.unexplainedBelowThreshold), {
-    columns: ['Name', 'Year', 'Attendance %'],
+    columns: ['Name', 'Year', 'Attendance %', 'Days*', 'Full Days'],
   }),
 )
 await Deno.writeTextFile(
   'explained-absences-below-85.csv',
   stringify(toCsvRows(data.explainedBelowThreshold), {
-    columns: ['Name', 'Year', 'Attendance %'],
+    columns: ['Name', 'Year', 'Attendance %', 'Days*', 'Full Days'],
   }),
 )
 console.log(

@@ -47,10 +47,27 @@ export function assembleAttendanceReport(
 }
 
 // claude: "500" is Compass's schoolSystemExportIdentifier for the "Unexplained"
-// claude: status — the only category the school wants counted here. Other
-// claude: countedAbsence statuses (medical, suspension, family holiday, etc.) are
-// claude: legitimate/excused and deliberately excluded.
+// claude: status.
 const UNEXPLAINED_STATUS_EXPORT_ID = '500'
+
+// claude: curated by the stakeholder — the specific countedAbsence reasons worth
+// claude: reporting on. Other countedAbsence statuses (accident, hospitalised,
+// claude: quarantine, suspension, extended family holiday, religious/cultural
+// claude: observance, school choice, the generic P/W codes, etc.) are deliberately
+// claude: excluded from "explained" absence figures even though Compass counts them
+// claude: as absences.
+const REPORTABLE_STATUS_EXPORT_IDS = new Set([
+  '200',
+  '201',
+  '208',
+  '209',
+  '211',
+  '212',
+  '300',
+  '500',
+  '806',
+  '807',
+])
 
 // claude: only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
 // claude: aren't tracked uniformly across students (see conversation on periodCode
@@ -80,10 +97,41 @@ export function calculateAttendancePercentages(
       .reduce((sum, line) => sum + line.expectedMinutes, 0)
     const explainedAbsenceMinutes = studentLines
       .filter((line) =>
-        line.countedAbsence &&
+        line.statusSchoolSystemExportIdentifier !== null &&
+        REPORTABLE_STATUS_EXPORT_IDS.has(line.statusSchoolSystemExportIdentifier) &&
         line.statusSchoolSystemExportIdentifier !== UNEXPLAINED_STATUS_EXPORT_ID
       )
       .reduce((sum, line) => sum + line.expectedMinutes, 0)
+
+    const linesByDate = new Map<string, AssembledAttendancePeriodLine[]>()
+    for (const line of studentLines) {
+      const date = line.start.substring(0, 10)
+      if (!linesByDate.has(date)) {
+        linesByDate.set(date, [])
+      }
+      linesByDate.get(date)!.push(line)
+    }
+
+    let unexplainedDaysAny = 0
+    let unexplainedDaysFull = 0
+    let explainedDaysAny = 0
+    let explainedDaysFull = 0
+
+    for (const dayLines of linesByDate.values()) {
+      const unexplainedCount = dayLines.filter((line) =>
+        line.statusSchoolSystemExportIdentifier === UNEXPLAINED_STATUS_EXPORT_ID
+      ).length
+      const explainedCount = dayLines.filter((line) =>
+        line.statusSchoolSystemExportIdentifier !== null &&
+        REPORTABLE_STATUS_EXPORT_IDS.has(line.statusSchoolSystemExportIdentifier) &&
+        line.statusSchoolSystemExportIdentifier !== UNEXPLAINED_STATUS_EXPORT_ID
+      ).length
+
+      if (unexplainedCount > 0) unexplainedDaysAny++
+      if (unexplainedCount === dayLines.length) unexplainedDaysFull++
+      if (explainedCount > 0) explainedDaysAny++
+      if (explainedCount === dayLines.length) explainedDaysFull++
+    }
 
     const { firstName, lastName, yearLevel } = studentLines[0]
 
@@ -103,6 +151,10 @@ export function calculateAttendancePercentages(
         ? null
         : Math.round((1 - explainedAbsenceMinutes / expectedMinutes) * 1000) /
           10,
+      unexplainedDaysAny,
+      unexplainedDaysFull,
+      explainedDaysAny,
+      explainedDaysFull,
     }
   })
 }

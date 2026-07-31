@@ -11,6 +11,8 @@ export interface AbsenceRow {
   name: string
   yearLevel: string | null
   attendancePercentage: number | null
+  daysAny: number
+  daysFull: number
 }
 
 export interface AttendanceReportData {
@@ -124,18 +126,24 @@ export async function getAttendanceReportData(
   function toAbsenceRow(
     p: (typeof matched)[number],
     attendancePercentage: number | null,
+    daysAny: number,
+    daysFull: number,
   ): AbsenceRow {
     return {
       name: `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim(),
       yearLevel: p.yearLevel,
       attendancePercentage,
+      daysAny,
+      daysFull,
     }
   }
 
   const unexplainedBelowThreshold = matched
     .filter((p) => p.attendancePercentage !== null && p.attendancePercentage < threshold)
     .sort((a, b) => (a.attendancePercentage ?? 0) - (b.attendancePercentage ?? 0))
-    .map((p) => toAbsenceRow(p, p.attendancePercentage))
+    .map((p) =>
+      toAbsenceRow(p, p.attendancePercentage, p.unexplainedDaysAny, p.unexplainedDaysFull)
+    )
 
   const explainedBelowThreshold = matched
     .filter((p) =>
@@ -145,7 +153,14 @@ export async function getAttendanceReportData(
     .sort((a, b) =>
       (a.explainedAttendancePercentage ?? 0) - (b.explainedAttendancePercentage ?? 0)
     )
-    .map((p) => toAbsenceRow(p, p.explainedAttendancePercentage))
+    .map((p) =>
+      toAbsenceRow(
+        p,
+        p.explainedAttendancePercentage,
+        p.explainedDaysAny,
+        p.explainedDaysFull,
+      )
+    )
 
   return {
     periodName: period.name,

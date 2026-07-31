@@ -302,9 +302,12 @@ export interface AssembledAttendancePeriodLine
 // claude: instructional time and aren't tracked uniformly across students anyway).
 // claude: unexplainedAbsenceMinutes only counts the "Unexplained"
 // claude: (schoolSystemExportIdentifier "500") status; explainedAbsenceMinutes
-// claude: counts every other countedAbsence status (medical, suspension, family
-// claude: holiday, etc.) — the two are mutually exclusive and reported separately
-// claude: rather than combined, since only unexplained absence is actionable.
+// claude: counts only the curated REPORTABLE_STATUS_EXPORT_IDS reasons (excluding
+// claude: 500) — the two are mutually exclusive and reported separately rather than
+// claude: combined, since only unexplained absence is actionable.
+// claude: the *Days fields count calendar dates rather than minutes: *DaysAny counts
+// claude: a date if the student had at least one qualifying period that day,
+// claude: *DaysFull only if every teaching period that day qualified.
 export interface StudentAttendancePercentage {
   compassPersonId: string
   firstName: string | null
@@ -315,4 +318,8 @@ export interface StudentAttendancePercentage {
   explainedAbsenceMinutes: number
   attendancePercentage: number | null
   explainedAttendancePercentage: number | null
+  unexplainedDaysAny: number
+  unexplainedDaysFull: number
+  explainedDaysAny: number
+  explainedDaysFull: number
 }

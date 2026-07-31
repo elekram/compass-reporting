@@ -3,7 +3,8 @@
     "run": "deno run -A --env-file=./deno.env main.ts",
     "sync": "deno run -A --env-file=./deno.env sync.ts",
     "report": "deno run -A --env-file=./deno.env report.ts",
-    "email-preview": "deno run -A --env-file=./deno.env email-preview.ts"
+    "email-preview": "deno run -A --env-file=./deno.env email-preview.ts",
+    "send-report": "deno run -A --env-file=./deno.env send-report.ts"
   },
   "fmt": {
     "semiColons": false,
@@ -14,7 +15,9 @@
   "imports": {
     "@std/assert": "jsr:@std/assert@1",
     "@std/csv": "jsr:@std/csv@^1.0.0",
+    "@std/encoding": "jsr:@std/encoding@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.0",
+    "denomailer": "https://deno.land/x/denomailer@1.6.0/mod.ts",
     "postgres": "https://deno.land/x/postgresjs/mod.js"
   }
 }
