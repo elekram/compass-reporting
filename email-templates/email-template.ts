@@ -73,24 +73,52 @@ function renderTrend(trend: number | null): string {
   return `<span style='color: ${color};'>${arrow} ${sign}${trend}%</span>`
 }
 
+// claude: placeholder cells for a future per-student breakdown (exact data TBD) —
+// claude: this row exists purely to lock in the table design; renderDetailRow is
+// claude: the only thing that'll need to change once the real values are known.
+const DETAIL_PLACEHOLDER_COUNT = 5
+
+function renderDetailRow(): string {
+  const cells = Array.from(
+    { length: DETAIL_PLACEHOLDER_COUNT },
+    (_, i) => `
+                  <td style='padding: 4px; width: ${
+      100 / DETAIL_PLACEHOLDER_COUNT
+    }%; text-align: center; font-family: sans-serif; font-size: 12px; color: #666666; background-color: #f9f7f6;'>${
+      i + 1
+    }</td>`,
+  ).join('')
+
+  return `
+      <tr>
+        <td colspan='7' style='padding: 0px 10px 10px 10px; border-bottom: 1px solid #f2eeed;'>
+          <table width='100%' border='0' cellspacing='0' cellpadding='0'>
+            <tr>${cells}
+            </tr>
+          </table>
+        </td>
+      </tr>`
+}
+
 function renderAbsenceRows(rows: AbsenceRow[]): string {
   return rows.map((row) => `
       <tr>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left; width: 40%;'>${
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left; width: 34%;'>${
     escapeHtml(row.name)
   }</td>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed;'>${
-    renderBar(row.attendancePercentage)
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #666666; text-align: left; width: 60px;'>${
+    escapeHtml(row.studentCode ?? '-')
   }</td>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
+        <td style='padding: 6px 10px;'>${renderBar(row.attendancePercentage)}</td>
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
     row.attendancePercentage ?? '-'
   }%</td>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
     renderTrend(row.trend)
   }</td>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysAny}</td>
-        <td style='padding: 6px 10px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysFull}</td>
-      </tr>`).join('')
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysAny}</td>
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysFull}</td>
+      </tr>${renderDetailRow()}`).join('')
 }
 
 function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
@@ -106,6 +134,7 @@ function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
               <table width='100%' border='0' cellspacing='0' cellpadding='0'>
                 <tr>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Name</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Code</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747;'>&nbsp;</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Attendance</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Trend</td>
@@ -118,23 +147,17 @@ function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
           </tr>`
 }
 
-function renderAbsenceSection(title: string, rows: AbsenceRow[]): string {
+function renderAbsenceBody(rows: AbsenceRow[]): string {
   const yearTables = groupByYearLevel(rows)
     .map(([yearLevel, groupRows]) => renderYearLevelTable(yearLevel, groupRows))
     .join('')
 
   return `
-          <tr>
-            <td class='innerpadding'
-              style='padding: 20px 0px 5px 0px; font-family: sans-serif; font-size: 18px; font-weight: bold; color: #283747;'>
-              ${escapeHtml(title)} (${rows.length} students)
-            </td>
-          </tr>
           ${
     rows.length === 0 ? '' : `
           <tr>
             <td class='innerpadding'
-              style='padding: 0px 0px 8px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
+              style='padding: 15px 0px 8px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
               Days* = at least one period this term; Full Days = every period that day. Green 85%+, orange 80-85%, red below 80%. Trend compares the last 14 days to the 14 days before that.
             </td>
           </tr>`
@@ -143,7 +166,7 @@ function renderAbsenceSection(title: string, rows: AbsenceRow[]): string {
     rows.length === 0
       ? `
           <tr>
-            <td class='innerpadding borderbottom' style='padding: 0px 0px 15px 0px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #666666;'>
+            <td class='innerpadding borderbottom' style='padding: 15px 0px 15px 0px; border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; color: #666666;'>
               No students.
             </td>
           </tr>`
@@ -337,7 +360,7 @@ export default function emailTemplate(data: AttendanceReportData): string {
               <table width='100%' border='0' cellspacing='0' cellpadding='0'>
                 <tr>
                   <td colspan="2" style='color: #283747;font-family: sans-serif; border:0px solid #f2eeed; padding: 0px 0px 13px 0px; font-size: 18px; vertical-align: top;text-align:center;'>
-                    <b>Attendance Report</b>
+                    <b>${escapeHtml(data.title)}</b>
                   </td>
                 </tr>
               </table>
@@ -349,11 +372,10 @@ export default function emailTemplate(data: AttendanceReportData): string {
               ${
     escapeHtml(data.periodName)
   } (${data.periodStart} to ${data.periodEnd}) &mdash;
-              ${data.totalStudents} students in total.
+              ${data.rows.length} of ${data.totalStudents} students.
             </td>
           </tr>
-          ${renderAbsenceSection('Unexplained absences', data.unexplainedRows)}
-          ${renderAbsenceSection('Explained absences', data.explainedRows)}
+          ${renderAbsenceBody(data.rows)}
           <tr>
           </tr>
         </table>

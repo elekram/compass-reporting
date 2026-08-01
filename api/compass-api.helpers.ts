@@ -37,6 +37,7 @@ export function assembleAttendanceReport(
       username: student?.username ?? null,
       gender: student?.gender ?? null,
       yearLevel: student?.yearLevel ?? null,
+      studentCode: student?.studentCode ?? null,
       statusName: status?.name ?? null,
       statusShortCode: status?.shortCode ?? null,
       statusSchoolSystemExportIdentifier: status?.schoolSystemExportIdentifier ?? null,
@@ -127,18 +128,27 @@ export function calculateAttendancePercentages(
         line.statusSchoolSystemExportIdentifier !== UNEXPLAINED_STATUS_EXPORT_ID
       ).length
 
-      if (unexplainedCount > 0) unexplainedDaysAny++
-      if (unexplainedCount === dayLines.length) unexplainedDaysFull++
-      if (explainedCount > 0) explainedDaysAny++
-      if (explainedCount === dayLines.length) explainedDaysFull++
+      if (unexplainedCount > 0) {
+        unexplainedDaysAny++
+      }
+      if (unexplainedCount === dayLines.length) {
+        unexplainedDaysFull++
+      }
+      if (explainedCount > 0) {
+        explainedDaysAny++
+      }
+      if (explainedCount === dayLines.length) {
+        explainedDaysFull++
+      }
     }
 
-    const { firstName, lastName, yearLevel } = studentLines[0]
+    const { firstName, lastName, studentCode, yearLevel } = studentLines[0]
 
     return {
       compassPersonId,
       firstName,
       lastName,
+      studentCode,
       yearLevel,
       expectedMinutes,
       unexplainedAbsenceMinutes,

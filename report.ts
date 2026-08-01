@@ -1,42 +1,20 @@
 import { stringify } from '@std/csv'
 import sql from './db.ts'
 import config from './config/config.ts'
-import { AbsenceRow, getAttendanceReportData } from './attendance-data.ts'
+import { AbsenceRow, buildReportData, getStudentAttendance } from './attendance-data.ts'
+import reports from './reports/registry.ts'
 
 const period = Deno.args.includes('year') ? config.year : config.getCurrentTerm()
-const data = await getAttendanceReportData(period)
+const dataset = await getStudentAttendance(period)
 
 console.log(
-  `${data.periodName} (${data.periodStart} to ${data.periodEnd}), ${data.totalStudents} students`,
-)
-
-console.log(`\nUnexplained absences: ${data.unexplainedRows.length} students`)
-console.table(
-  data.unexplainedRows.map((r) => ({
-    Name: r.name,
-    Year: r.yearLevel,
-    'Attendance %': r.attendancePercentage,
-    Trend: r.trend,
-    'Days*': r.daysAny,
-    'Full Days': r.daysFull,
-  })),
-)
-
-console.log(`\nExplained absences: ${data.explainedRows.length} students`)
-console.table(
-  data.explainedRows.map((r) => ({
-    Name: r.name,
-    Year: r.yearLevel,
-    'Attendance %': r.attendancePercentage,
-    Trend: r.trend,
-    'Days*': r.daysAny,
-    'Full Days': r.daysFull,
-  })),
+  `${dataset.periodName} (${dataset.periodStart} to ${dataset.periodEnd}), ${dataset.totalStudents} students`,
 )
 
 function toCsvRows(rows: AbsenceRow[]) {
   return rows.map((r) => ({
     Name: r.name,
+    Code: r.studentCode ?? '',
     Year: r.yearLevel ?? '',
     'Attendance %': r.attendancePercentage ?? '',
     Trend: r.trend ?? '',
@@ -45,18 +23,30 @@ function toCsvRows(rows: AbsenceRow[]) {
   }))
 }
 
-await Deno.writeTextFile(
-  'unexplained-absences.csv',
-  stringify(toCsvRows(data.unexplainedRows), {
-    columns: ['Name', 'Year', 'Attendance %', 'Trend', 'Days*', 'Full Days'],
-  }),
-)
-await Deno.writeTextFile(
-  'explained-absences.csv',
-  stringify(toCsvRows(data.explainedRows), {
-    columns: ['Name', 'Year', 'Attendance %', 'Trend', 'Days*', 'Full Days'],
-  }),
-)
-console.log('\nWrote unexplained-absences.csv and explained-absences.csv')
+for (const def of reports) {
+  const data = buildReportData(dataset, def)
+
+  console.log(`\n${data.title}: ${data.rows.length} students`)
+  console.table(
+    data.rows.map((r) => ({
+      Name: r.name,
+      Code: r.studentCode,
+      Year: r.yearLevel,
+      'Attendance %': r.attendancePercentage,
+      Trend: r.trend,
+      'Days*': r.daysAny,
+      'Full Days': r.daysFull,
+    })),
+  )
+
+  const outFile = `${def.id}.csv`
+  await Deno.writeTextFile(
+    outFile,
+    stringify(toCsvRows(data.rows), {
+      columns: ['Name', 'Code', 'Year', 'Attendance %', 'Trend', 'Days*', 'Full Days'],
+    }),
+  )
+  console.log(`Wrote ${outFile}`)
+}
 
 await sql.end()

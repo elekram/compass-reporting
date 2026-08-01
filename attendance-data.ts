@@ -10,14 +10,21 @@ import {
   StudentAttendancePercentage,
 } from './api/compass-api.types.ts'
 import { Period } from './config/config.ts'
+import { ReportDefinition } from './reports/types.ts'
 
 // claude: trend windows are always relative to today, independent of whatever
 // claude: report period (term/year) is being generated — a coordinator wants to
 // claude: know recent momentum regardless of how far back the report itself looks.
 const TREND_WINDOW_DAYS = 14
 
+// claude: default row-inclusion cutoff on attendance %, used unless a
+// claude: ReportDefinition overrides it — also the band edge the email template
+// claude: colours green/orange/red around.
+const DEFAULT_THRESHOLD = 85
+
 export interface AbsenceRow {
   name: string
+  studentCode: string | null
   yearLevel: string | null
   attendancePercentage: number | null
   daysAny: number
@@ -28,13 +35,44 @@ export interface AbsenceRow {
   trend: number | null
 }
 
+// claude: single-section report data — one category (unexplained/explained), one
+// claude: ReportDefinition. Multiple reports over the same period are built by
+// claude: calling buildReportData once per definition, not by branching this shape.
 export interface AttendanceReportData {
+  title: string
   periodName: string
   periodStart: string
   periodEnd: string
   totalStudents: number
-  unexplainedRows: AbsenceRow[]
-  explainedRows: AbsenceRow[]
+  rows: AbsenceRow[]
+}
+
+interface CategoryMetrics {
+  percentage: number | null
+  daysAny: number
+  daysFull: number
+  trend: number | null
+}
+
+// claude: raw per-student numbers for a period, both categories, before any
+// claude: report-specific filtering/sorting/threshold is applied. Shared base that
+// claude: every ReportDefinition's buildReportData call is derived from, so adding
+// claude: a new report never means re-querying or re-deriving this.
+export interface StudentAttendance {
+  compassPersonId: string
+  name: string
+  studentCode: string | null
+  yearLevel: string | null
+  unexplained: CategoryMetrics
+  explained: CategoryMetrics
+}
+
+export interface AttendanceDataset {
+  periodName: string
+  periodStart: string
+  periodEnd: string
+  totalStudents: number
+  students: StudentAttendance[]
 }
 
 interface PeriodLineRow {
@@ -181,13 +219,34 @@ async function getTrends(
   return trends
 }
 
-// claude: shared by report.ts (console/CSV output) and email-preview.ts (HTML
-// claude: preview generation) — both need the identical unexplained/explained
-// claude: per-student lists for a period, so the DB query and aggregation logic
-// claude: lives here once rather than being duplicated.
-export async function getAttendanceReportData(
-  period: Period,
-): Promise<AttendanceReportData> {
+function toStudentAttendance(
+  p: StudentAttendancePercentage,
+  trend: TrendPair | undefined,
+): StudentAttendance {
+  return {
+    compassPersonId: p.compassPersonId,
+    name: `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim(),
+    studentCode: p.studentCode,
+    yearLevel: p.yearLevel,
+    unexplained: {
+      percentage: p.attendancePercentage,
+      daysAny: p.unexplainedDaysAny,
+      daysFull: p.unexplainedDaysFull,
+      trend: trend?.unexplainedTrend ?? null,
+    },
+    explained: {
+      percentage: p.explainedAttendancePercentage,
+      daysAny: p.explainedDaysAny,
+      daysFull: p.explainedDaysFull,
+      trend: trend?.explainedTrend ?? null,
+    },
+  }
+}
+
+// claude: the single DB-fetching entry point — every report, however it's sliced
+// claude: (category/year level/threshold), is derived from this same dataset via
+// claude: buildReportData rather than re-querying period_lines per report.
+export async function getStudentAttendance(period: Period): Promise<AttendanceDataset> {
   const today = new Date().toISOString().substring(0, 10)
   // claude: term may still be in progress — don't project attendance across days
   // claude: that haven't happened yet, so cap the upper bound at today.
@@ -209,62 +268,53 @@ export async function getAttendanceReportData(
   // claude: aren't actionable for a coordinator without a name.
   const matched = percentages.filter((p) => p.firstName !== null)
 
-  function toAbsenceRow(
-    p: StudentAttendancePercentage,
-    attendancePercentage: number | null,
-    daysAny: number,
-    daysFull: number,
-    trend: number | null,
-  ): AbsenceRow {
-    return {
-      name: `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim(),
-      yearLevel: p.yearLevel,
-      attendancePercentage,
-      daysAny,
-      daysFull,
-      trend,
-    }
-  }
-
-  // claude: both sections only show the orange/red band (below the 85% green
-  // claude: cutoff used in the email template's barColor) — showing every student,
-  // claude: including everyone already attending fine, was too noisy in practice.
-  const unexplainedRows = matched
-    .filter((p) => p.attendancePercentage !== null && p.attendancePercentage < 85)
-    .sort((a, b) => (a.attendancePercentage ?? 0) - (b.attendancePercentage ?? 0))
-    .map((p) =>
-      toAbsenceRow(
-        p,
-        p.attendancePercentage,
-        p.unexplainedDaysAny,
-        p.unexplainedDaysFull,
-        trends.get(p.compassPersonId)?.unexplainedTrend ?? null,
-      )
-    )
-
-  const explainedRows = matched
-    .filter((p) =>
-      p.explainedAttendancePercentage !== null && p.explainedAttendancePercentage < 85
-    )
-    .sort((a, b) =>
-      (a.explainedAttendancePercentage ?? 0) - (b.explainedAttendancePercentage ?? 0)
-    )
-    .map((p) =>
-      toAbsenceRow(
-        p,
-        p.explainedAttendancePercentage,
-        p.explainedDaysAny,
-        p.explainedDaysFull,
-        trends.get(p.compassPersonId)?.explainedTrend ?? null,
-      )
-    )
-
   return {
     periodName: period.name,
     periodStart: period.start,
     periodEnd: end,
-    totalStudents: percentages.length,
-    unexplainedRows,
-    explainedRows,
+    totalStudents: matched.length,
+    students: matched.map((p) => toStudentAttendance(p, trends.get(p.compassPersonId))),
+  }
+}
+
+// claude: shapes one AttendanceDataset into the single-section rows a specific
+// claude: ReportDefinition wants — year-level filter, category pick, threshold
+// claude: cutoff and sort all live here so reports/*.ts definitions stay pure data.
+export function buildReportData(
+  dataset: AttendanceDataset,
+  def: ReportDefinition,
+): AttendanceReportData {
+  const threshold = def.threshold ?? DEFAULT_THRESHOLD
+  const yearLevels = def.yearLevels
+
+  const scoped = yearLevels
+    ? dataset.students.filter((s) =>
+      s.yearLevel !== null && yearLevels.includes(s.yearLevel)
+    )
+    : dataset.students
+
+  const rows: AbsenceRow[] = scoped
+    .filter((s) => {
+      const percentage = s[def.category].percentage
+      return percentage !== null && percentage < threshold
+    })
+    .sort((a, b) => (a[def.category].percentage ?? 0) - (b[def.category].percentage ?? 0))
+    .map((s) => ({
+      name: s.name,
+      studentCode: s.studentCode,
+      yearLevel: s.yearLevel,
+      attendancePercentage: s[def.category].percentage,
+      daysAny: s[def.category].daysAny,
+      daysFull: s[def.category].daysFull,
+      trend: s[def.category].trend,
+    }))
+
+  return {
+    title: def.title,
+    periodName: dataset.periodName,
+    periodStart: dataset.periodStart,
+    periodEnd: dataset.periodEnd,
+    totalStudents: dataset.totalStudents,
+    rows,
   }
 }

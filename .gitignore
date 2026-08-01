@@ -4,5 +4,5 @@ deno.env
 /cert
 /postgres-data
 /.deno-cache
-/unexplained-absences.csv
-/explained-absences.csv
+/*.csv
+/email-templates/preview-*.html

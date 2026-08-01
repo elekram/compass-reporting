@@ -288,6 +288,7 @@ export interface AssembledAttendancePeriodLine
   username: string | null
   gender: string | null
   yearLevel: string | null
+  studentCode: string | null
   statusName: string | null
   statusShortCode: string | null
   statusSchoolSystemExportIdentifier: string | null
@@ -312,6 +313,7 @@ export interface StudentAttendancePercentage {
   compassPersonId: string
   firstName: string | null
   lastName: string | null
+  studentCode: string | null
   yearLevel: string | null
   expectedMinutes: number
   unexplainedAbsenceMinutes: number
