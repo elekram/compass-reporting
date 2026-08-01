@@ -73,21 +73,20 @@ function renderTrend(trend: number | null): string {
   return `<span style='color: ${color};'>${arrow} ${sign}${trend}%</span>`
 }
 
-// claude: placeholder cells for a future per-student breakdown (exact data TBD) —
-// claude: this row exists purely to lock in the table design; renderDetailRow is
-// claude: the only thing that'll need to change once the real values are known.
-const DETAIL_PLACEHOLDER_COUNT = 5
+// claude: display labels for row.statusGroupCounts — order and grouping must match
+// claude: STATUS_GROUPS in api/compass-api.helpers.ts, which is the source of truth.
+const STATUS_GROUP_LABELS = ['200/201/209', '208/300', '211/212', '500/806', '807']
 
-function renderDetailRow(): string {
-  const cells = Array.from(
-    { length: DETAIL_PLACEHOLDER_COUNT },
-    (_, i) => `
+function renderDetailRow(statusGroupCounts: number[]): string {
+  const cells = STATUS_GROUP_LABELS.map((label, i) => `
                   <td style='padding: 4px; width: ${
-      100 / DETAIL_PLACEHOLDER_COUNT
-    }%; text-align: center; font-family: sans-serif; font-size: 12px; color: #666666; background-color: #f9f7f6;'>${
-      i + 1
-    }</td>`,
-  ).join('')
+    100 / STATUS_GROUP_LABELS.length
+  }%; text-align: center; font-family: sans-serif; background-color: #f9f7f6;'>
+                    <div style='font-size: 13px; color: #283747;'>${
+    statusGroupCounts[i] ?? 0
+  }</div>
+                    <div style='font-size: 10px; color: #999999;'>${label}</div>
+                  </td>`).join('')
 
   return `
       <tr>
@@ -118,7 +117,7 @@ function renderAbsenceRows(rows: AbsenceRow[]): string {
   }</td>
         <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysAny}</td>
         <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysFull}</td>
-      </tr>${renderDetailRow()}`).join('')
+      </tr>${renderDetailRow(row.statusGroupCounts)}`).join('')
 }
 
 function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
@@ -158,7 +157,7 @@ function renderAbsenceBody(rows: AbsenceRow[]): string {
           <tr>
             <td class='innerpadding'
               style='padding: 15px 0px 8px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
-              Days* = at least one period this term; Full Days = every period that day. Green 85%+, orange 80-85%, red below 80%. Trend compares the last 14 days to the 14 days before that.
+              Days* = at least one period this term; Full Days = every period that day. Green 85%+, orange 80-85%, red below 80%. Trend compares the last 14 days to the 14 days before that. The row under each student is a period count by status code group (200/201/209, 208/300, 211/212, 500/806, 807).
             </td>
           </tr>`
   }

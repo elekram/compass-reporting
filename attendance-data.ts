@@ -33,6 +33,9 @@ export interface AbsenceRow {
   // claude: +3.2 means attendance improved 3.2 points); null if either window has
   // claude: no expected minutes for the student (e.g. new enrolment, holidays).
   trend: number | null
+  // claude: period-line counts per STATUS_GROUPS (compass-api.helpers.ts), same
+  // claude: order — not category-specific, unlike the fields above.
+  statusGroupCounts: number[]
 }
 
 // claude: single-section report data — one category (unexplained/explained), one
@@ -65,6 +68,7 @@ export interface StudentAttendance {
   yearLevel: string | null
   unexplained: CategoryMetrics
   explained: CategoryMetrics
+  statusGroupCounts: number[]
 }
 
 export interface AttendanceDataset {
@@ -240,6 +244,7 @@ function toStudentAttendance(
       daysFull: p.explainedDaysFull,
       trend: trend?.explainedTrend ?? null,
     },
+    statusGroupCounts: p.statusGroupCounts,
   }
 }
 
@@ -307,6 +312,7 @@ export function buildReportData(
       daysAny: s[def.category].daysAny,
       daysFull: s[def.category].daysFull,
       trend: s[def.category].trend,
+      statusGroupCounts: s.statusGroupCounts,
     }))
 
   return {

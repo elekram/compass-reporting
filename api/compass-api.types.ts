@@ -309,6 +309,10 @@ export interface AssembledAttendancePeriodLine
 // claude: the *Days fields count calendar dates rather than minutes: *DaysAny counts
 // claude: a date if the student had at least one qualifying period that day,
 // claude: *DaysFull only if every teaching period that day qualified.
+// claude: statusGroupCounts is a period-line count (not collapsed to days) per
+// claude: stakeholder-defined status group — see STATUS_GROUPS in
+// claude: compass-api.helpers.ts for the schoolSystemExportIdentifier groupings and
+// claude: display order.
 export interface StudentAttendancePercentage {
   compassPersonId: string
   firstName: string | null
@@ -318,6 +322,7 @@ export interface StudentAttendancePercentage {
   expectedMinutes: number
   unexplainedAbsenceMinutes: number
   explainedAbsenceMinutes: number
+  statusGroupCounts: number[]
   attendancePercentage: number | null
   explainedAttendancePercentage: number | null
   unexplainedDaysAny: number

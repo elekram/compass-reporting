@@ -70,6 +70,16 @@ const REPORTABLE_STATUS_EXPORT_IDS = new Set([
   '807',
 ])
 
+// claude: stakeholder-specified groupings for the per-student breakdown row —
+// claude: index order here is display order (left to right) in the report.
+const STATUS_GROUPS: Set<string>[] = [
+  new Set(['200', '201', '209']),
+  new Set(['208', '300']),
+  new Set(['211', '212']),
+  new Set(['500', '806']),
+  new Set(['807']),
+]
+
 // claude: only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
 // claude: aren't tracked uniformly across students (see conversation on periodCode
 // claude: coverage), so including them would unevenly pad expectedMinutes.
@@ -144,6 +154,13 @@ export function calculateAttendancePercentages(
 
     const { firstName, lastName, studentCode, yearLevel } = studentLines[0]
 
+    const statusGroupCounts = STATUS_GROUPS.map((group) =>
+      studentLines.filter((line) =>
+        line.statusSchoolSystemExportIdentifier !== null &&
+        group.has(line.statusSchoolSystemExportIdentifier)
+      ).length
+    )
+
     return {
       compassPersonId,
       firstName,
@@ -153,6 +170,7 @@ export function calculateAttendancePercentages(
       expectedMinutes,
       unexplainedAbsenceMinutes,
       explainedAbsenceMinutes,
+      statusGroupCounts,
       attendancePercentage: expectedMinutes === 0
         ? null
         : Math.round((1 - unexplainedAbsenceMinutes / expectedMinutes) * 1000) /
