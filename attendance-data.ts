@@ -3,11 +3,15 @@ import { personGetStudentsBasic } from './api/compass-api.ts'
 import {
   assembleAttendanceReport,
   calculateAttendancePercentages,
+  PRESENT_STATUS_EXPORT_ID,
+  REPORTABLE_STATUS_EXPORT_IDS,
+  UNEXPLAINED_STATUS_EXPORT_ID,
 } from './api/compass-api.helpers.ts'
 import {
   AttendanceStatus,
   PeriodAttendanceLine,
   StudentAttendancePercentage,
+  StudentBasic,
 } from './api/compass-api.types.ts'
 import { Period } from './config/config.ts'
 import { ReportDefinition } from './reports/types.ts'
@@ -38,6 +42,28 @@ export interface AbsenceRow {
   statusGroupCounts: number[]
 }
 
+// claude: 'missing' = no period line recorded at all for that period that day
+// claude: (rendered "N/A"), distinct from a recorded code that just isn't flagged.
+export type DailyCellKind = 'present' | 'flagged' | 'other' | 'missing'
+
+export interface DailyPeriodCell {
+  code: string | null
+  kind: DailyCellKind
+}
+
+export interface DailyBreakdownRow {
+  name: string
+  studentCode: string | null
+  cells: DailyPeriodCell[]
+}
+
+// claude: null when the owning ReportDefinition didn't opt in (dailyPeriodBreakdown
+// claude: unset) or no complete day was found yet to report on.
+export interface DailyBreakdownData {
+  date: string
+  rows: DailyBreakdownRow[]
+}
+
 // claude: single-section report data — one category (unexplained/explained), one
 // claude: ReportDefinition. Multiple reports over the same period are built by
 // claude: calling buildReportData once per definition, not by branching this shape.
@@ -48,6 +74,7 @@ export interface AttendanceReportData {
   periodEnd: string
   totalStudents: number
   rows: AbsenceRow[]
+  dailyBreakdown: DailyBreakdownData | null
 }
 
 interface CategoryMetrics {
@@ -154,6 +181,162 @@ async function queryPeriodLines(
     WHERE start >= ${startIso} AND start < ${endExclusiveIso}
   `
   return rows.map(toPeriodAttendanceLine)
+}
+
+// claude: the 6 numbered teaching periods a school day is built from — excludes
+// claude: non-teaching blocks (AS/BS/L1/L2/R), which don't fit a fixed 6-column
+// claude: layout and aren't what "6 periods of the day" refers to.
+const TEACHING_PERIOD_CODES = ['1', '2', '3', '4', '5', '6']
+
+// claude: a day only counts as "complete" once roughly the whole school has synced
+// claude: rolls for it — the most recent day in period_lines is often still being
+// claude: marked in Compass and syncs with a small fraction of students (e.g. 48 of
+// claude: ~686), which would make the breakdown table look broken for everyone else.
+// claude: 300 is comfortably below every normal day's headcount (600+) and well
+// claude: above a partially-synced one.
+const MIN_STUDENTS_FOR_COMPLETE_DAY = 300
+
+// claude: school timezone — `start` is stored as timestamptz (UTC instants), but
+// claude: Melbourne is UTC+10/+11, so morning periods (e.g. period 1 at 08:50 local)
+// claude: land on the *previous* UTC calendar date. Grouping/filtering by a raw
+// claude: `start::date` (as this used to) splits a single local school day across
+// claude: two UTC dates — Postgres's `AT TIME ZONE` handles the DST-aware
+// claude: conversion correctly, so all local-day logic goes through it rather than
+// claude: JS Date arithmetic.
+const SCHOOL_TIMEZONE = 'Australia/Melbourne'
+
+async function findMostRecentCompleteDay(): Promise<string | null> {
+  const [row] = await sql<[{ day: Date }?]>`
+    SELECT (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date AS day
+    FROM period_lines
+    WHERE (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date < (now() AT TIME ZONE ${SCHOOL_TIMEZONE})::date
+    GROUP BY day
+    HAVING COUNT(DISTINCT compass_person_id) >= ${MIN_STUDENTS_FOR_COMPLETE_DAY}
+    ORDER BY day DESC
+    LIMIT 1
+  `
+  return row ? row.day.toISOString().substring(0, 10) : null
+}
+
+// claude: fetches every period line whose local (SCHOOL_TIMEZONE) calendar date
+// claude: matches dateIso — see the SCHOOL_TIMEZONE comment for why this can't just
+// claude: be a UTC start/end range like queryPeriodLines.
+async function queryPeriodLinesForLocalDay(
+  dateIso: string,
+): Promise<PeriodAttendanceLine[]> {
+  const rows: PeriodLineRow[] = await sql`
+    SELECT period_line_id, compass_person_id, campus_guid, description,
+           expected_minutes, start, finish, period_code,
+           prevalent_overall_status_id, standard_class_shadow, teaching_time,
+           updated_timestamp
+    FROM period_lines
+    WHERE (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date = ${dateIso}
+  `
+  return rows.map(toPeriodAttendanceLine)
+}
+
+function classifyDailyCode(code: string | null): DailyCellKind {
+  if (code === null) {
+    return 'missing'
+  }
+  if (code === PRESENT_STATUS_EXPORT_ID) {
+    return 'present'
+  }
+  if (REPORTABLE_STATUS_EXPORT_IDS.has(code)) {
+    return 'flagged'
+  }
+  return 'other'
+}
+
+// claude: builds the extra table (opt-in via ReportDefinition.dailyPeriodBreakdown)
+// claude: showing, for the most recent complete school day, one row per student (in
+// claude: this report's category/yearLevels scope) who had at least one flagged
+// claude: period that day, with one column per teaching period. Separate from
+// claude: getStudentAttendance/buildReportData since it's day-scoped rather than
+// claude: term-scoped and needs its own period_lines query.
+export async function getDailyPeriodBreakdown(
+  def: ReportDefinition,
+): Promise<DailyBreakdownData | null> {
+  if (!def.dailyPeriodBreakdown) {
+    return null
+  }
+
+  const day = await findMostRecentCompleteDay()
+  if (!day) {
+    return null
+  }
+
+  const [statusRows, students, lines]: [
+    StatusRow[],
+    StudentBasic[],
+    PeriodAttendanceLine[],
+  ] = await Promise.all([
+    sql<StatusRow[]>`SELECT * FROM statuses`,
+    personGetStudentsBasic(),
+    queryPeriodLinesForLocalDay(day),
+  ])
+
+  const statusById = new Map(statusRows.map((s) => [s.status_id, s]))
+  const studentById = new Map(students.map((s) => [s.compassPersonId, s]))
+
+  const teachingLines = lines.filter((line) =>
+    line.teachingTime && TEACHING_PERIOD_CODES.includes(line.periodCode)
+  )
+
+  const linesByStudent = new Map<string, PeriodAttendanceLine[]>()
+  for (const line of teachingLines) {
+    if (!linesByStudent.has(line.compassPersonId)) {
+      linesByStudent.set(line.compassPersonId, [])
+    }
+    linesByStudent.get(line.compassPersonId)!.push(line)
+  }
+
+  // claude: "flagged" scoped to the report's own category — explained reports only
+  // claude: pull a student in for an explained code, unexplained reports only for
+  // claude: the unexplained one — same split calculateAttendancePercentages uses.
+  const inclusionIds = def.category === 'unexplained'
+    ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
+    : new Set(
+      [...REPORTABLE_STATUS_EXPORT_IDS].filter((id) =>
+        id !== UNEXPLAINED_STATUS_EXPORT_ID
+      ),
+    )
+
+  const rows: DailyBreakdownRow[] = []
+  for (const [compassPersonId, studentLines] of linesByStudent) {
+    const student = studentById.get(compassPersonId)
+    if (!student) {
+      continue
+    }
+    if (def.yearLevels && !def.yearLevels.includes(student.yearLevel)) {
+      continue
+    }
+
+    const linesByPeriod = new Map(studentLines.map((line) => [line.periodCode, line]))
+    const codes = TEACHING_PERIOD_CODES.map((periodCode) => {
+      const line = linesByPeriod.get(periodCode)
+      if (!line) {
+        return null
+      }
+      const status = statusById.get(line.prevalentOverallStatusId)
+      return status?.school_system_export_identifier ?? null
+    })
+
+    const hasFlaggedPeriod = codes.some((code) => code !== null && inclusionIds.has(code))
+    if (!hasFlaggedPeriod) {
+      continue
+    }
+
+    rows.push({
+      name: `${student.firstName} ${student.lastName}`.trim(),
+      studentCode: student.studentCode,
+      cells: codes.map((code) => ({ code, kind: classifyDailyCode(code) })),
+    })
+  }
+
+  rows.sort((a, b) => a.name.localeCompare(b.name))
+
+  return { date: day, rows }
 }
 
 function isoDateDaysAgo(days: number): string {
@@ -322,5 +505,19 @@ export function buildReportData(
     periodEnd: dataset.periodEnd,
     totalStudents: dataset.totalStudents,
     rows,
+    dailyBreakdown: null,
   }
+}
+
+// claude: buildReportData plus the opt-in daily breakdown table — the version
+// claude: send-report.ts/email-preview.ts should use, since those render the full
+// claude: email. report.ts (CSV/console output) has no use for the daily table, so
+// claude: it calls buildReportData directly and stays synchronous.
+export async function buildFullReportData(
+  dataset: AttendanceDataset,
+  def: ReportDefinition,
+): Promise<AttendanceReportData> {
+  const data = buildReportData(dataset, def)
+  const dailyBreakdown = await getDailyPeriodBreakdown(def)
+  return { ...data, dailyBreakdown }
 }

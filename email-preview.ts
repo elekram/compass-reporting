@@ -1,6 +1,6 @@
 import sql from './db.ts'
 import config from './config/config.ts'
-import { buildReportData, getStudentAttendance } from './attendance-data.ts'
+import { buildFullReportData, getStudentAttendance } from './attendance-data.ts'
 import reports, { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
 
@@ -10,7 +10,7 @@ const def = getReport(reportId)
 
 const period = args.includes('year') ? config.year : config.getCurrentTerm()
 const dataset = await getStudentAttendance(period)
-const data = buildReportData(dataset, def)
+const data = await buildFullReportData(dataset, def)
 
 const html = emailTemplate(data)
 const outFile = `email-templates/preview-${def.id}.html`

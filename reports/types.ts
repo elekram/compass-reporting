@@ -15,4 +15,10 @@ export interface ReportDefinition {
   threshold?: number
   // claude: default recipients for this report; send-report.ts's CLI arg overrides.
   recipients?: string[]
+  // claude: opts into the extra "daily period breakdown" table rendered above the
+  // claude: per-student table — one row per student (in this report's category and
+  // claude: yearLevels scope) who had at least one flagged period on the most recent
+  // claude: complete school day, one column per teaching period. See
+  // claude: getDailyPeriodBreakdown in attendance-data.ts.
+  dailyPeriodBreakdown?: boolean
 }

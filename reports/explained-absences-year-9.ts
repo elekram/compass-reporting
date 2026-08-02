@@ -5,6 +5,7 @@ const explainedAbsencesYear9: ReportDefinition = {
   title: 'Explained Absences — Year 9',
   category: 'explained',
   yearLevels: ['9'],
+  dailyPeriodBreakdown: true,
 }
 
 export default explainedAbsencesYear9

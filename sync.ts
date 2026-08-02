@@ -8,6 +8,18 @@ import config from './config/config.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
 
+// claude: offset-paginated (skip/take) against a "total" re-read from Compass on
+// claude: every page — if sync runs mid-school-day while rows for today are still
+// claude: being written (teachers marking later periods), that total can drift
+// claude: between pages and silently skip rows. A skipped row's updated_timestamp is
+// claude: still older than the watermark we then record, so a normal incremental
+// claude: sync never retries it — confirmed in practice (CAP0007's periods 3/4 for
+// claude: 30 July were missing from period_lines despite Compass showing them
+// claude: marked). This is a self-heal, not a root-cause fix: it can't stop a page
+// claude: from being dropped, only guarantee a dropped row gets a fresh chance on
+// claude: every run until it's within this window.
+const TRAILING_RESYNC_DAYS = 14
+
 // claude: sync_state is only ever written after a run fully completes (see bottom of
 // claude: this file), so reading it back is always safe — unlike computing
 // claude: MAX(updated_timestamp) live from period_lines, which would be poisoned by a
@@ -185,6 +197,40 @@ await attendanceGetPeriodLinesBetweenBounds(
 )
 
 console.log(`sync.ts: done, upserted ${syncedCount} period lines total`)
+
+// claude: unconditional — ignores modifiedSinceTimestamp entirely (passes
+// claude: FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
+// claude: regardless of when it was last modified, not just ones Compass reports as
+// claude: recently changed. See the TRAILING_RESYNC_DAYS comment for why the
+// claude: watermark-based sync above can't be trusted to have caught everything on
+// claude: its own. Idempotent (upsert on period_line_id), so re-fetching rows we
+// claude: already have is just wasted bandwidth, not a correctness risk.
+const trailingStart = new Date()
+trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
+const trailingStartIso = trailingStart.toISOString().substring(0, 10)
+
+console.log(
+  `sync.ts: running trailing resync for ${trailingStartIso} to ${today} (self-heals rows the sync above may have silently dropped)`,
+)
+
+let trailingSyncedCount = 0
+
+await attendanceGetPeriodLinesBetweenBounds(
+  trailingStartIso,
+  today,
+  FIRST_SYNC_TIMESTAMP,
+  async (page) => {
+    await upsertPeriodLines(page)
+    trailingSyncedCount += page.length
+    console.log(
+      `sync.ts: trailing resync upserted ${trailingSyncedCount} period lines so far`,
+    )
+  },
+)
+
+console.log(
+  `sync.ts: trailing resync done, upserted ${trailingSyncedCount} period lines total`,
+)
 
 const [{ max }] = await sql<[{ max: string | null }]>`
   SELECT max(updated_timestamp) AS max FROM period_lines

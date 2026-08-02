@@ -49,7 +49,11 @@ export function assembleAttendanceReport(
 
 // claude: "500" is Compass's schoolSystemExportIdentifier for the "Unexplained"
 // claude: status.
-const UNEXPLAINED_STATUS_EXPORT_ID = '500'
+export const UNEXPLAINED_STATUS_EXPORT_ID = '500'
+
+// claude: "100" is Compass's schoolSystemExportIdentifier for the "Present" status —
+// claude: used to colour the daily period-breakdown table green.
+export const PRESENT_STATUS_EXPORT_ID = '100'
 
 // claude: curated by the stakeholder — the specific countedAbsence reasons worth
 // claude: reporting on. Other countedAbsence statuses (accident, hospitalised,
@@ -57,7 +61,7 @@ const UNEXPLAINED_STATUS_EXPORT_ID = '500'
 // claude: observance, school choice, the generic P/W codes, etc.) are deliberately
 // claude: excluded from "explained" absence figures even though Compass counts them
 // claude: as absences.
-const REPORTABLE_STATUS_EXPORT_IDS = new Set([
+export const REPORTABLE_STATUS_EXPORT_IDS = new Set([
   '200',
   '201',
   '208',

@@ -1,4 +1,10 @@
-import { AbsenceRow, AttendanceReportData } from '../attendance-data.ts'
+import {
+  AbsenceRow,
+  AttendanceReportData,
+  DailyBreakdownData,
+  DailyCellKind,
+  DailyPeriodCell,
+} from '../attendance-data.ts'
 
 function escapeHtml(value: string): string {
   return value
@@ -142,6 +148,78 @@ function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
                 </tr>
                 ${renderAbsenceRows(rows)}
               </table>
+            </td>
+          </tr>`
+}
+
+// claude: colours are advisory (background + text), not semantic elsewhere — chosen
+// claude: per stakeholder request so flagged codes "pop" for coordinators.
+const DAILY_CELL_BACKGROUND: Record<DailyCellKind, string> = {
+  present: '#eafaf1',
+  flagged: '#fdedec',
+  other: '#f2eeed',
+  missing: '#ffffff',
+}
+
+const DAILY_CELL_TEXT: Record<DailyCellKind, string> = {
+  present: '#1e8449',
+  flagged: '#c0392b',
+  other: '#666666',
+  missing: '#999999',
+}
+
+function renderDailyCell(cell: DailyPeriodCell): string {
+  const label = cell.kind === 'missing' ? 'N/A' : cell.code ?? 'N/A'
+  return `
+                  <td style='padding: 6px 4px; text-align: center; font-family: sans-serif; font-size: 12px; background-color: ${
+    DAILY_CELL_BACKGROUND[cell.kind]
+  }; color: ${DAILY_CELL_TEXT[cell.kind]};'>${escapeHtml(label)}</td>`
+}
+
+function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
+  return rows.map((row) => `
+                <tr>
+                  <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left;'>${
+    escapeHtml(row.name)
+  }</td>
+                  <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #666666; text-align: left;'>${
+    escapeHtml(row.studentCode ?? '-')
+  }</td>${row.cells.map(renderDailyCell).join('')}
+                </tr>`).join('')
+}
+
+function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
+  if (!daily || daily.rows.length === 0) {
+    return ''
+  }
+
+  const periodHeaders = daily.rows[0].cells.map((_, i) => `
+                  <td style='padding: 6px 4px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 12px; font-weight: bold; color: #283747; text-align: center;'>P${
+    i + 1
+  }</td>`).join('')
+
+  return `
+          <tr>
+            <td class='innerpadding'
+              style='padding: 12px 0px 4px 0px; font-family: sans-serif; font-size: 15px; font-weight: bold; color: #283747;'>
+              Period Breakdown &mdash; ${escapeHtml(daily.date)} (${daily.rows.length})
+            </td>
+          </tr>
+          <tr>
+            <td class='innerpadding borderbottom' style='padding: 0px 0px 10px 0px; border-bottom: 1px solid #f2eeed;'>
+              <table width='100%' border='0' cellspacing='0' cellpadding='0'>
+                <tr>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Name</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Code</td>${periodHeaders}
+                </tr>
+                ${renderDailyBreakdownRows(daily.rows)}
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td class='innerpadding'
+              style='padding: 8px 0px 0px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
+              Green = Present. Red = a tracked absence code (200/201/208/209/211/212/300/500/806/807). Grey = another status. N/A = no period recorded.
             </td>
           </tr>`
 }
@@ -374,6 +452,7 @@ export default function emailTemplate(data: AttendanceReportData): string {
               ${data.rows.length} of ${data.totalStudents} students.
             </td>
           </tr>
+          ${renderDailyBreakdown(data.dailyBreakdown)}
           ${renderAbsenceBody(data.rows)}
           <tr>
           </tr>
