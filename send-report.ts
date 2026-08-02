@@ -33,8 +33,26 @@ const period = args.includes('year') ? config.year : config.getCurrentTerm()
 const dataset = await getStudentAttendance(period)
 const data = await buildFullReportData(dataset, def)
 
+// claude: subject format per stakeholder request: "[Absences]Year 12 Fri 31-07-26".
+// claude: falls back to the report title when there's no single year level or no
+// claude: daily breakdown date to anchor the subject to (e.g. whole-school reports).
+function subjectLine(): string {
+  const yearLabel = def.yearLevels?.length === 1 ? `Year ${def.yearLevels[0]}` : def.title
+  if (!data.dailyBreakdown) return `[Absences] ${yearLabel}`
+  const [y, m, d] = data.dailyBreakdown.date.split('-')
+  const weekday = new Date(`${data.dailyBreakdown.date}T00:00:00Z`).toLocaleDateString(
+    'en-US',
+    {
+      weekday: 'short',
+      timeZone: 'UTC',
+    },
+  )
+  return `[Absences] ${yearLabel} ${weekday} ${d}-${m}-${y.slice(2)}`
+}
+
 const html = emailTemplate(data)
-await sendMail({ to, subject: `${def.title} — ${data.periodName}`, html })
-console.log(`Sent "${def.title}" for ${data.periodName} to ${to.join(', ')}`)
+const subject = subjectLine()
+await sendMail({ to, subject, html })
+console.log(`Sent "${subject}" to ${to.join(', ')}`)
 
 await sql.end()

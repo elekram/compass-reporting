@@ -181,7 +181,7 @@ const DAILY_CODE_EMOJI: Record<string, string> = {
   '212': '😔',
   '500': '🤷',
   '806': '🤷',
-  '807': '🤷',
+  '807': '🙆',
 }
 
 // claude: hover-tooltip text (title attribute) for each code in a daily-breakdown
@@ -189,6 +189,7 @@ const DAILY_CODE_EMOJI: Record<string, string> = {
 // claude: apps), so it's a supplement to the emoji/colour coding, not a replacement.
 const DAILY_CODE_LABEL: Record<string, string> = {
   '0': 'Not Marked',
+  '100': 'Present',
   '200': 'Medical',
   '201': 'Illness',
   '208': 'School Refusal',
@@ -202,14 +203,12 @@ const DAILY_CODE_LABEL: Record<string, string> = {
 }
 
 function renderDailyCell(cell: DailyPeriodCell): string {
-  const title = cell.code ? DAILY_CODE_LABEL[cell.code] : undefined
-  // claude: code "0" is Compass's own "Not Marked" status — shown by name rather
-  // claude: than the bare digit, unlike every other tracked code.
-  const label = cell.kind === 'missing'
-    ? 'N/A'
-    : cell.code === '0'
-    ? title ?? 'Not Marked'
-    : cell.code ?? 'N/A'
+  const title = cell.kind === 'missing'
+    ? 'Unscheduled'
+    : cell.code
+    ? DAILY_CODE_LABEL[cell.code]
+    : undefined
+  const label = cell.kind === 'missing' ? 'UN' : cell.code ?? 'UN'
   const emoji = cell.code ? DAILY_CODE_EMOJI[cell.code] : undefined
   return `
                   <td ${
@@ -276,7 +275,9 @@ function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
           <tr>
             <td class='innerpadding'
               style='padding: 8px 0px 0px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
-              Green = Present. Red = a tracked absence code (200/201/208/209/211/212/300/500/806/807). Grey = another status. N/A = no period recorded.
+              Green = Present.<br>
+              Red = coordinator tracked code (200/201/208/209/211/212/300/500/806/807).<br>
+              Grey = Untracked. UN = Unscheduled.
             </td>
           </tr>`
 }
