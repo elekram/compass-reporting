@@ -168,12 +168,50 @@ const DAILY_CELL_TEXT: Record<DailyCellKind, string> = {
   missing: '#999999',
 }
 
+// claude: per-stakeholder-request emoji shown above the code in each daily-breakdown
+// claude: cell. Groupings mirror STATUS_GROUPS (compass-api.helpers.ts) except its
+// claude: last two groups (500/806 and 807) collapse to one emoji here.
+const DAILY_CODE_EMOJI: Record<string, string> = {
+  '200': '⚕️',
+  '201': '⚕️',
+  '209': '⚕️',
+  '208': '🙅',
+  '300': '🙅',
+  '211': '😔',
+  '212': '😔',
+  '500': '🤷',
+  '806': '🤷',
+  '807': '🤷',
+}
+
+// claude: hover-tooltip text (title attribute) for each code in a daily-breakdown
+// claude: cell — per stakeholder request. Desktop-only (no hover on mobile mail
+// claude: apps), so it's a supplement to the emoji/colour coding, not a replacement.
+const DAILY_CODE_LABEL: Record<string, string> = {
+  '200': 'Medical',
+  '201': 'Illness',
+  '208': 'School Refusal',
+  '209': 'Dentist',
+  '211': 'Bereavement',
+  '212': 'Sorry Business Related',
+  '300': 'Truancy Offsite',
+  '500': 'Unexplained',
+  '806': 'Parent Choice Unapproved',
+  '807': 'Parent Choice Approved',
+}
+
 function renderDailyCell(cell: DailyPeriodCell): string {
   const label = cell.kind === 'missing' ? 'N/A' : cell.code ?? 'N/A'
+  const emoji = cell.code ? DAILY_CODE_EMOJI[cell.code] : undefined
+  const title = cell.code ? DAILY_CODE_LABEL[cell.code] : undefined
   return `
-                  <td style='padding: 6px 4px; text-align: center; font-family: sans-serif; font-size: 12px; background-color: ${
+                  <td ${
+    title ? `title='${escapeHtml(title)}' ` : ''
+  }style='padding: 6px 4px; text-align: center; font-family: sans-serif; font-size: 12px; background-color: ${
     DAILY_CELL_BACKGROUND[cell.kind]
-  }; color: ${DAILY_CELL_TEXT[cell.kind]};'>${escapeHtml(label)}</td>`
+  }; color: ${DAILY_CELL_TEXT[cell.kind]};'>${
+    emoji ? `<div style='font-size: 14px; line-height: 16px;'>${emoji}</div>` : ''
+  }${escapeHtml(label)}</td>`
 }
 
 function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
@@ -186,6 +224,16 @@ function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
     escapeHtml(row.studentCode ?? '-')
   }</td>${row.cells.map(renderDailyCell).join('')}
                 </tr>`).join('')
+}
+
+// claude: daily.date is a plain calendar date (no time component) — parsing it as
+// claude: UTC midnight and formatting with timeZone: 'UTC' keeps the weekday tied to
+// claude: that date regardless of the server's own local timezone.
+function weekdayName(dateIso: string): string {
+  return new Date(`${dateIso}T00:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    timeZone: 'UTC',
+  })
 }
 
 function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
@@ -202,7 +250,9 @@ function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
           <tr>
             <td class='innerpadding'
               style='padding: 12px 0px 4px 0px; font-family: sans-serif; font-size: 15px; font-weight: bold; color: #283747;'>
-              Period Breakdown &mdash; ${escapeHtml(daily.date)} (${daily.rows.length})
+              Period Breakdown &mdash; ${escapeHtml(weekdayName(daily.date))} ${
+    escapeHtml(daily.date)
+  } (${daily.rows.length})
             </td>
           </tr>
           <tr>
