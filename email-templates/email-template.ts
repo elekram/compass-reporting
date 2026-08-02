@@ -188,6 +188,7 @@ const DAILY_CODE_EMOJI: Record<string, string> = {
 // claude: cell — per stakeholder request. Desktop-only (no hover on mobile mail
 // claude: apps), so it's a supplement to the emoji/colour coding, not a replacement.
 const DAILY_CODE_LABEL: Record<string, string> = {
+  '0': 'Not Marked',
   '200': 'Medical',
   '201': 'Illness',
   '208': 'School Refusal',
@@ -201,9 +202,15 @@ const DAILY_CODE_LABEL: Record<string, string> = {
 }
 
 function renderDailyCell(cell: DailyPeriodCell): string {
-  const label = cell.kind === 'missing' ? 'N/A' : cell.code ?? 'N/A'
-  const emoji = cell.code ? DAILY_CODE_EMOJI[cell.code] : undefined
   const title = cell.code ? DAILY_CODE_LABEL[cell.code] : undefined
+  // claude: code "0" is Compass's own "Not Marked" status — shown by name rather
+  // claude: than the bare digit, unlike every other tracked code.
+  const label = cell.kind === 'missing'
+    ? 'N/A'
+    : cell.code === '0'
+    ? title ?? 'Not Marked'
+    : cell.code ?? 'N/A'
+  const emoji = cell.code ? DAILY_CODE_EMOJI[cell.code] : undefined
   return `
                   <td ${
     title ? `title='${escapeHtml(title)}' ` : ''
