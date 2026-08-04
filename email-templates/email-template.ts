@@ -128,8 +128,8 @@ function renderPeriodCells(label: string, metrics: PeriodMetrics): string {
         <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
     metrics.attendancePercentage ?? '-'
   }%</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${metrics.daysAny}</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${metrics.daysFull}</td>`
+        <td title='Days with at least one flagged period, but not necessarily the whole day' style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${metrics.daysAny}</td>
+        <td title='Days where every period was flagged' style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${metrics.daysFull}</td>`
 }
 
 function renderAbsenceRows(rows: AbsenceRow[]): string {
@@ -140,7 +140,7 @@ function renderAbsenceRows(rows: AbsenceRow[]): string {
   }<br><span style='font-size: 12px; color: #666666;'>${
     escapeHtml(row.studentCode ?? '-')
   }</span></td>
-        <td rowspan='2' style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
+        <td rowspan='2' title='Most recent 14 days vs 14 days before it' style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
     renderTrend(row.year.trend)
   }</td>${renderPeriodCells('Year to Date', row.year)}
       </tr>
