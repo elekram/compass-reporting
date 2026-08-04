@@ -4,11 +4,13 @@ import config from './config/config.ts'
 import { AbsenceRow, buildReportData, getStudentAttendance } from './attendance-data.ts'
 import reports from './reports/registry.ts'
 
-const period = Deno.args.includes('year') ? config.year : config.getCurrentTerm()
-const dataset = await getStudentAttendance(period)
+const [yearDataset, termDataset] = await Promise.all([
+  getStudentAttendance(config.year),
+  getStudentAttendance(config.getCurrentTerm()),
+])
 
 console.log(
-  `${dataset.periodName} (${dataset.periodStart} to ${dataset.periodEnd}), ${dataset.totalStudents} students`,
+  `${yearDataset.periodName} (${yearDataset.periodStart} to ${yearDataset.periodEnd}), ${yearDataset.totalStudents} students`,
 )
 
 function toCsvRows(rows: AbsenceRow[]) {
@@ -16,15 +18,19 @@ function toCsvRows(rows: AbsenceRow[]) {
     Name: r.name,
     Code: r.studentCode ?? '',
     Year: r.yearLevel ?? '',
-    'Attendance %': r.attendancePercentage ?? '',
-    Trend: r.trend ?? '',
-    'Days*': r.daysAny,
-    'Full Days': r.daysFull,
+    'Year Attendance %': r.year.attendancePercentage ?? '',
+    'Year Trend': r.year.trend ?? '',
+    'Year Days*': r.year.daysAny,
+    'Year Full Days': r.year.daysFull,
+    'Term Attendance %': r.term.attendancePercentage ?? '',
+    'Term Trend': r.term.trend ?? '',
+    'Term Days*': r.term.daysAny,
+    'Term Full Days': r.term.daysFull,
   }))
 }
 
 for (const def of reports) {
-  const data = buildReportData(dataset, def)
+  const data = buildReportData(yearDataset, termDataset, def)
 
   console.log(`\n${data.title}: ${data.rows.length} students`)
   console.table(
@@ -32,10 +38,10 @@ for (const def of reports) {
       Name: r.name,
       Code: r.studentCode,
       Year: r.yearLevel,
-      'Attendance %': r.attendancePercentage,
-      Trend: r.trend,
-      'Days*': r.daysAny,
-      'Full Days': r.daysFull,
+      'Year Attendance %': r.year.attendancePercentage,
+      'Year Trend': r.year.trend,
+      'Term Attendance %': r.term.attendancePercentage,
+      'Term Trend': r.term.trend,
     })),
   )
 
@@ -43,7 +49,19 @@ for (const def of reports) {
   await Deno.writeTextFile(
     outFile,
     stringify(toCsvRows(data.rows), {
-      columns: ['Name', 'Code', 'Year', 'Attendance %', 'Trend', 'Days*', 'Full Days'],
+      columns: [
+        'Name',
+        'Code',
+        'Year',
+        'Year Attendance %',
+        'Year Trend',
+        'Year Days*',
+        'Year Full Days',
+        'Term Attendance %',
+        'Term Trend',
+        'Term Days*',
+        'Term Full Days',
+      ],
     }),
   )
   console.log(`Wrote ${outFile}`)

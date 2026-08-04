@@ -4,6 +4,7 @@ import {
   DailyBreakdownData,
   DailyCellKind,
   DailyPeriodCell,
+  PeriodMetrics,
 } from '../attendance-data.ts'
 
 function escapeHtml(value: string): string {
@@ -12,6 +13,13 @@ function escapeHtml(value: string): string {
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
+}
+
+// claude: dateIso is a plain YYYY-MM-DD calendar date, so this is a straight
+// claude: string reshuffle rather than a Date parse — avoids any timezone drift.
+function formatDateDdMmYyyySlash(dateIso: string): string {
+  const [y, m, d] = dateIso.split('-')
+  return `${d}/${m}/${y}`
 }
 
 // claude: groups preserve the incoming row order (rows arrive pre-sorted ascending
@@ -56,7 +64,7 @@ function renderBar(percentage: number | null): string {
   const empty = 100 - filled
   const color = barColor(filled)
   return `
-          <table width='120' border='0' cellpadding='0' cellspacing='0' style='border-collapse: collapse;'>
+          <table width='180' border='0' cellpadding='0' cellspacing='0' style='border-collapse: collapse;'>
             <tr>${
     filled > 0
       ? `<td width='${filled}%' bgcolor='${color}' style='font-size: 1px; line-height: 10px;'>&nbsp;</td>`
@@ -88,10 +96,10 @@ function renderDetailRow(statusGroupCounts: number[]): string {
                   <td style='padding: 4px; width: ${
     100 / STATUS_GROUP_LABELS.length
   }%; text-align: center; font-family: sans-serif; background-color: #f9f7f6;'>
+                    <div style='font-size: 10px; color: #999999;'>${label}</div>
                     <div style='font-size: 13px; color: #283747;'>${
     statusGroupCounts[i] ?? 0
   }</div>
-                    <div style='font-size: 10px; color: #999999;'>${label}</div>
                   </td>`).join('')
 
   return `
@@ -105,46 +113,65 @@ function renderDetailRow(statusGroupCounts: number[]): string {
       </tr>`
 }
 
+// claude: shared cells for a period's (Year or Term) sub-row — everything after
+// claude: the leading Name/Code/Trend cells, which only the Year sub-row renders
+// claude: (with rowspan='2') so they aren't repeated per period. Trend lives there
+// claude: rather than per-row because it's always relative to today (see
+// claude: TREND_WINDOW_DAYS), not to the row's own period — the Year and Term rows
+// claude: would otherwise show the same number twice.
+function renderPeriodCells(label: string, metrics: PeriodMetrics): string {
+  return `
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; color: #666666; text-align: left; width: 90px; white-space: nowrap;'>${
+    escapeHtml(label)
+  }</td>
+        <td style='padding: 6px 10px;'>${renderBar(metrics.attendancePercentage)}</td>
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
+    metrics.attendancePercentage ?? '-'
+  }%</td>
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${metrics.daysAny}</td>
+        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${metrics.daysFull}</td>`
+}
+
 function renderAbsenceRows(rows: AbsenceRow[]): string {
   return rows.map((row) => `
       <tr>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left; width: 34%;'>${
+        <td rowspan='2' style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left; width: 34%;'>${
     escapeHtml(row.name)
-  }</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #666666; text-align: left; width: 60px;'>${
+  }<br><span style='font-size: 12px; color: #666666;'>${
     escapeHtml(row.studentCode ?? '-')
-  }</td>
-        <td style='padding: 6px 10px;'>${renderBar(row.attendancePercentage)}</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 50px;'>${
-    row.attendancePercentage ?? '-'
-  }%</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
-    renderTrend(row.trend)
-  }</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysAny}</td>
-        <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: right; width: 40px;'>${row.daysFull}</td>
+  }</span></td>
+        <td rowspan='2' style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; text-align: right; width: 70px;'>${
+    renderTrend(row.year.trend)
+  }</td>${renderPeriodCells('Year to Date', row.year)}
+      </tr>
+      <tr>${renderPeriodCells('Term to Date', row.term)}
       </tr>${renderDetailRow(row.statusGroupCounts)}`).join('')
 }
 
-function renderYearLevelTable(yearLevel: string, rows: AbsenceRow[]): string {
+function renderYearLevelTable(
+  yearLevel: string,
+  rows: AbsenceRow[],
+  threshold: number,
+): string {
   return `
           <tr>
             <td class='innerpadding'
-              style='padding: 12px 0px 4px 0px; font-family: sans-serif; font-size: 15px; font-weight: bold; color: #283747;'>
-              Year ${escapeHtml(yearLevel)} (${rows.length})
+              style='padding: 24px 0px 4px 0px; font-family: sans-serif; font-size: 18px; font-weight: bold; color: #283747;'>
+              ${rows.length} Students Below ${threshold}% Year to Date
             </td>
           </tr>
+          ${renderBlurb(threshold)}
           <tr>
             <td class='innerpadding borderbottom' style='padding: 0px 0px 10px 0px; border-bottom: 1px solid #f2eeed;'>
               <table width='100%' border='0' cellspacing='0' cellpadding='0'>
                 <tr>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Name</td>
-                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Code</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Trend</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: left;'>Period</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747;'>&nbsp;</td>
                   <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Attendance</td>
-                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;'>Trend</td>
-                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Days with at least one qualifying period'>Days*</td>
-                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Full days'>Full Days</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Days with at least one flagged period, but not necessarily the whole day'>Any Day*</td>
+                  <td style='padding: 6px 10px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 13px; font-weight: bold; color: #283747; text-align: right;' title='Days where every period was flagged'>Full Days</td>
                 </tr>
                 ${renderAbsenceRows(rows)}
               </table>
@@ -242,11 +269,7 @@ function weekdayName(dateIso: string): string {
   })
 }
 
-function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
-  if (!daily || daily.rows.length === 0) {
-    return ''
-  }
-
+function renderDailyDayTable(daily: DailyBreakdownData): string {
   const periodHeaders = daily.rows[0].cells.map((_, i) => `
                   <td style='padding: 6px 4px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 12px; font-weight: bold; color: #283747; text-align: center;'>P${
     i + 1
@@ -256,9 +279,9 @@ function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
           <tr>
             <td class='innerpadding'
               style='padding: 12px 0px 4px 0px; font-family: sans-serif; font-size: 15px; font-weight: bold; color: #283747;'>
-              Period Breakdown &mdash; ${escapeHtml(weekdayName(daily.date))} ${
-    escapeHtml(daily.date)
-  } (${daily.rows.length})
+              Period Breakdown - ${escapeHtml(weekdayName(daily.date))} ${
+    formatDateDdMmYyyySlash(daily.date)
+  } - ${daily.rows.length} Students
             </td>
           </tr>
           <tr>
@@ -271,32 +294,104 @@ function renderDailyBreakdown(daily: DailyBreakdownData | null): string {
                 ${renderDailyBreakdownRows(daily.rows)}
               </table>
             </td>
-          </tr>
+          </tr>`
+}
+
+// claude: renders one table per complete day (see DAILY_BREAKDOWN_DAYS in
+// claude: attendance-data.ts), most recent first, with a single shared legend
+// claude: after the last one rather than repeating it per day.
+function renderDailyBreakdown(days: DailyBreakdownData[]): string {
+  if (days.length === 0) {
+    return ''
+  }
+
+  return `${days.map(renderDailyDayTable).join('')}
+          ${renderDailyLegend()}`
+}
+
+// claude: colour swatch legend for the daily breakdown cells, matching the
+// claude: pattern used for the Bar legend in renderBlurb below.
+function renderDailyLegend(): string {
+  const swatchRows: [string, string][] = [
+    ['#27ae60', 'Present.'],
+    ['#c0392b', 'Coordinator tracked code (200/201/208/209/211/212/300/500/806/807).'],
+    ['#999999', 'Untracked.'],
+  ]
+
+  const rows = swatchRows.map(([color, label]) => `
+                <tr>${renderSwatch(color, label)}</tr>`).join('')
+
+  return `
           <tr>
-            <td class='innerpadding'
-              style='padding: 8px 0px 0px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
-              Green = Present.<br>
-              Red = coordinator tracked code (200/201/208/209/211/212/300/500/806/807).<br>
-              Grey = Untracked. UN = Unscheduled.
+            <td class='innerpadding' style='padding: 8px 0px 0px 0px;'>
+              <table width='100%' border='0' cellspacing='0' cellpadding='0'>${rows}
+                <tr>
+                  <td style='padding: 3px 10px 3px 0px; font-family: sans-serif; font-size: 11px; font-weight: bold; color: #283747; text-align: left; white-space: nowrap;'>UN</td>
+                  <td style='padding: 3px 0px; font-family: sans-serif; font-size: 11px; color: #666666; text-align: left;'>Unscheduled.</td>
+                </tr>
+              </table>
             </td>
           </tr>`
 }
 
-function renderAbsenceBody(rows: AbsenceRow[]): string {
+// claude: minimal explanation of the table below, shown under the "N Students
+// claude: Below X%" heading per stakeholder request — a compact label/value table
+// claude: rather than a paragraph of prose.
+// claude: small colour swatch (matches barColor's own bands, not the row-inclusion
+// claude: threshold) + label, used inline in the Bar legend row below.
+function renderSwatch(color: string, label: string): string {
+  return `<td style='padding: 0px 4px 0px 0px;'><table width='12' height='8' border='0' cellpadding='0' cellspacing='0'><tr><td bgcolor='${color}' style='font-size: 1px; line-height: 8px;'>&nbsp;</td></tr></table></td><td style='padding: 0px 10px 0px 0px; font-family: sans-serif; font-size: 11px; color: #666666;'>${
+    escapeHtml(label)
+  }</td>`
+}
+
+function renderBlurb(threshold: number): string {
+  const items: [string, string][] = [
+    ['Any Day*', 'At least one flagged period that day.'],
+    ['Full Days', 'Every period that day was flagged.'],
+    ['Trend', 'Most recent 14 days vs 14 days before it.'],
+    ['Absence Codes', 'Totals for the whole year.'],
+  ]
+
+  const itemRows = items.map(([label, value]) => `
+                <tr>
+                  <td style='padding: 3px 10px 3px 0px; font-family: sans-serif; font-size: 11px; font-weight: bold; color: #283747; text-align: left; white-space: nowrap; vertical-align: top;'>${
+    escapeHtml(label)
+  }</td>
+                  <td style='padding: 3px 0px; font-family: sans-serif; font-size: 11px; color: #666666; text-align: left;'>${
+    escapeHtml(value)
+  }</td>
+                </tr>`).join('')
+
+  const barRow = `
+                <tr>
+                  <td style='padding: 3px 10px 3px 0px; font-family: sans-serif; font-size: 11px; font-weight: bold; color: #283747; text-align: left; white-space: nowrap; vertical-align: middle;'>Bar</td>
+                  <td style='padding: 3px 0px; vertical-align: middle;'>
+                    <table border='0' cellspacing='0' cellpadding='0'>
+                      <tr>${renderSwatch('#c0392b', '<80%')}${
+    renderSwatch('#EC9E26', `80-${threshold}%`)
+  }${renderSwatch('#27ae60', `${threshold}%+`)}</tr>
+                    </table>
+                  </td>
+                </tr>`
+
+  return `
+          <tr>
+            <td class='innerpadding' style='padding: 0px 0px 10px 0px;'>
+              <table width='100%' border='0' cellspacing='0' cellpadding='0'>${itemRows}${barRow}
+              </table>
+            </td>
+          </tr>`
+}
+
+function renderAbsenceBody(rows: AbsenceRow[], threshold: number): string {
   const yearTables = groupByYearLevel(rows)
-    .map(([yearLevel, groupRows]) => renderYearLevelTable(yearLevel, groupRows))
+    .map(([yearLevel, groupRows]) =>
+      renderYearLevelTable(yearLevel, groupRows, threshold)
+    )
     .join('')
 
   return `
-          ${
-    rows.length === 0 ? '' : `
-          <tr>
-            <td class='innerpadding'
-              style='padding: 15px 0px 8px 0px; font-family: sans-serif; font-size: 12px; color: #666666;'>
-              Days* = at least one period this term; Full Days = every period that day. Green 85%+, orange 80-85%, red below 80%. Trend compares the last 14 days to the 14 days before that. The row under each student is a period count by status code group (200/201/209, 208/300, 211/212, 500/806, 807).
-            </td>
-          </tr>`
-  }
           ${
     rows.length === 0
       ? `
@@ -485,17 +580,14 @@ export default function emailTemplate(data: AttendanceReportData): string {
           style='width: 100%;max-width: 600px;'>
           <tr>
             <td class='innerpadding borderbottom'
-            style='padding: 5px 0px 10px 0px;border-bottom: 1px solid #f2eeed; font-family: sans-serif; font-size: 14px; text-align:left;'>
-            <img class="logo logo-white" src="https://www.cheltsec.vic.edu.au/sig/chelt-logo.png">
-            </td>
-          </tr>
-          <tr>
-            <td class='innerpadding borderbottom'
               style='padding: 15px 0px 15px 0px;border-bottom: 1px solid #f2eeed;'>
               <table width='100%' border='0' cellspacing='0' cellpadding='0'>
                 <tr>
-                  <td colspan="2" style='color: #283747;font-family: sans-serif; border:0px solid #f2eeed; padding: 0px 0px 13px 0px; font-size: 18px; vertical-align: top;text-align:center;'>
+                  <td style='color: #283747;font-family: sans-serif; padding: 0px 10px 0px 0px; font-size: 18px; vertical-align: middle; text-align: left;'>
                     <b>${escapeHtml(data.title)}</b>
+                  </td>
+                  <td style='width: 154px; text-align: right; vertical-align: middle;'>
+                    <img class="logo logo-white" src="https://www.cheltsec.vic.edu.au/sig/chelt-logo.png" width="154" height="61" style="width: 154px; height: 61px;">
                   </td>
                 </tr>
               </table>
@@ -504,14 +596,13 @@ export default function emailTemplate(data: AttendanceReportData): string {
           <tr>
             <td class='innerpadding borderbottom'
               style='padding: 15px 0px 10px 0px;border-bottom: 0px solid #f2eeed; font-family: sans-serif; font-size: 16px;'>
-              ${
-    escapeHtml(data.periodName)
-  } (${data.periodStart} to ${data.periodEnd}) &mdash;
-              ${data.rows.length} of ${data.totalStudents} students.
+              ${formatDateDdMmYyyySlash(data.periodStart)} to ${
+    formatDateDdMmYyyySlash(data.periodEnd)
+  } - ${data.rows.length} Students at Risk
             </td>
           </tr>
           ${renderDailyBreakdown(data.dailyBreakdown)}
-          ${renderAbsenceBody(data.rows)}
+          ${renderAbsenceBody(data.rows, data.threshold)}
           <tr>
           </tr>
         </table>

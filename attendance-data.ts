@@ -14,7 +14,7 @@ import {
   StudentBasic,
 } from './api/compass-api.types.ts'
 import { Period } from './config/config.ts'
-import { ReportDefinition } from './reports/types.ts'
+import { AbsenceCategory, ReportDefinition } from './reports/types.ts'
 
 // claude: trend windows are always relative to today, independent of whatever
 // claude: report period (term/year) is being generated — a coordinator wants to
@@ -26,10 +26,7 @@ const TREND_WINDOW_DAYS = 14
 // claude: colours green/orange/red around.
 const DEFAULT_THRESHOLD = 85
 
-export interface AbsenceRow {
-  name: string
-  studentCode: string | null
-  yearLevel: string | null
+export interface PeriodMetrics {
   attendancePercentage: number | null
   daysAny: number
   daysFull: number
@@ -37,8 +34,20 @@ export interface AbsenceRow {
   // claude: +3.2 means attendance improved 3.2 points); null if either window has
   // claude: no expected minutes for the student (e.g. new enrolment, holidays).
   trend: number | null
+}
+
+// claude: one row = one qualifying student, carrying both their year-to-date and
+// claude: current-term numbers (see buildReportData) — the email template renders
+// claude: these as two sub-rows under the student's name, per stakeholder request.
+export interface AbsenceRow {
+  name: string
+  studentCode: string | null
+  yearLevel: string | null
+  year: PeriodMetrics
+  term: PeriodMetrics
   // claude: period-line counts per STATUS_GROUPS (compass-api.helpers.ts), same
-  // claude: order — not category-specific, unlike the fields above.
+  // claude: order, scoped to the *year* (not term) — a single running total shown
+  // claude: once per student rather than split per period row.
   statusGroupCounts: number[]
 }
 
@@ -73,8 +82,14 @@ export interface AttendanceReportData {
   periodStart: string
   periodEnd: string
   totalStudents: number
+  // claude: row-inclusion cutoff this report was built with (def.threshold ??
+  // claude: DEFAULT_THRESHOLD) — carried through so the email template can state it
+  // claude: (e.g. "Below 85%") without hardcoding the default.
+  threshold: number
   rows: AbsenceRow[]
-  dailyBreakdown: DailyBreakdownData | null
+  // claude: one entry per complete day covered (see DAILY_BREAKDOWN_DAYS), most
+  // claude: recent first; empty when the report didn't opt in or no days qualified.
+  dailyBreakdown: DailyBreakdownData[]
 }
 
 interface CategoryMetrics {
@@ -205,17 +220,19 @@ const MIN_STUDENTS_FOR_COMPLETE_DAY = 300
 // claude: JS Date arithmetic.
 const SCHOOL_TIMEZONE = 'Australia/Melbourne'
 
-async function findMostRecentCompleteDay(): Promise<string | null> {
-  const [row] = await sql<[{ day: Date }?]>`
+// claude: most recent complete days first (descending) — the daily breakdown
+// claude: table renders them in this order, most recent day on top.
+async function findMostRecentCompleteDays(count: number): Promise<string[]> {
+  const rows: { day: Date }[] = await sql`
     SELECT (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date AS day
     FROM period_lines
     WHERE (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date < (now() AT TIME ZONE ${SCHOOL_TIMEZONE})::date
     GROUP BY day
     HAVING COUNT(DISTINCT compass_person_id) >= ${MIN_STUDENTS_FOR_COMPLETE_DAY}
     ORDER BY day DESC
-    LIMIT 1
+    LIMIT ${count}
   `
-  return row ? row.day.toISOString().substring(0, 10) : null
+  return rows.map((row) => row.day.toISOString().substring(0, 10))
 }
 
 // claude: fetches every period line whose local (SCHOOL_TIMEZONE) calendar date
@@ -248,36 +265,17 @@ function classifyDailyCode(code: string | null): DailyCellKind {
   return 'other'
 }
 
-// claude: builds the extra table (opt-in via ReportDefinition.dailyPeriodBreakdown)
-// claude: showing, for the most recent complete school day, one row per student (in
-// claude: this report's category/yearLevels scope) who had at least one flagged
-// claude: period that day, with one column per teaching period. Separate from
-// claude: getStudentAttendance/buildReportData since it's day-scoped rather than
-// claude: term-scoped and needs its own period_lines query.
-export async function getDailyPeriodBreakdown(
+// claude: how many of the most recent complete school days the breakdown table
+// claude: covers — per stakeholder request, was 1 (just "yesterday").
+const DAILY_BREAKDOWN_DAYS = 3
+
+async function buildDailyBreakdownForDay(
+  day: string,
+  statusById: Map<string, StatusRow>,
+  studentById: Map<string, StudentBasic>,
   def: ReportDefinition,
-): Promise<DailyBreakdownData | null> {
-  if (!def.dailyPeriodBreakdown) {
-    return null
-  }
-
-  const day = await findMostRecentCompleteDay()
-  if (!day) {
-    return null
-  }
-
-  const [statusRows, students, lines]: [
-    StatusRow[],
-    StudentBasic[],
-    PeriodAttendanceLine[],
-  ] = await Promise.all([
-    sql<StatusRow[]>`SELECT * FROM statuses`,
-    personGetStudentsBasic(),
-    queryPeriodLinesForLocalDay(day),
-  ])
-
-  const statusById = new Map(statusRows.map((s) => [s.status_id, s]))
-  const studentById = new Map(students.map((s) => [s.compassPersonId, s]))
+): Promise<DailyBreakdownData> {
+  const lines = await queryPeriodLinesForLocalDay(day)
 
   const teachingLines = lines.filter((line) =>
     line.teachingTime && TEACHING_PERIOD_CODES.includes(line.periodCode)
@@ -337,6 +335,40 @@ export async function getDailyPeriodBreakdown(
   rows.sort((a, b) => a.name.localeCompare(b.name))
 
   return { date: day, rows }
+}
+
+// claude: builds the extra table(s) (opt-in via ReportDefinition.dailyPeriodBreakdown)
+// claude: showing, for each of the most recent DAILY_BREAKDOWN_DAYS complete school
+// claude: days, one row per student (in this report's category/yearLevels scope) who
+// claude: had at least one flagged period that day, with one column per teaching
+// claude: period. Separate from getStudentAttendance/buildReportData since it's
+// claude: day-scoped rather than term-scoped and needs its own period_lines queries.
+// claude: days with no qualifying students are dropped (mirrors the old single-day
+// claude: behaviour of hiding the table entirely when empty).
+export async function getDailyPeriodBreakdown(
+  def: ReportDefinition,
+): Promise<DailyBreakdownData[]> {
+  if (!def.dailyPeriodBreakdown) {
+    return []
+  }
+
+  const days = await findMostRecentCompleteDays(DAILY_BREAKDOWN_DAYS)
+  if (days.length === 0) {
+    return []
+  }
+
+  const [statusRows, students]: [StatusRow[], StudentBasic[]] = await Promise.all([
+    sql<StatusRow[]>`SELECT * FROM statuses`,
+    personGetStudentsBasic(),
+  ])
+  const statusById = new Map(statusRows.map((s) => [s.status_id, s]))
+  const studentById = new Map(students.map((s) => [s.compassPersonId, s]))
+
+  const results = await Promise.all(
+    days.map((day) => buildDailyBreakdownForDay(day, statusById, studentById, def)),
+  )
+
+  return results.filter((result) => result.rows.length > 0)
 }
 
 function isoDateDaysAgo(days: number): string {
@@ -465,21 +497,45 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
   }
 }
 
-// claude: shapes one AttendanceDataset into the single-section rows a specific
-// claude: ReportDefinition wants — year-level filter, category pick, threshold
-// claude: cutoff and sort all live here so reports/*.ts definitions stay pure data.
+function toPeriodMetrics(
+  s: StudentAttendance | undefined,
+  category: AbsenceCategory,
+): PeriodMetrics {
+  if (!s) {
+    return { attendancePercentage: null, daysAny: 0, daysFull: 0, trend: null }
+  }
+  const m = s[category]
+  return {
+    attendancePercentage: m.percentage,
+    daysAny: m.daysAny,
+    daysFull: m.daysFull,
+    trend: m.trend,
+  }
+}
+
+// claude: shapes a year AttendanceDataset (plus the matching term dataset for the
+// claude: term row) into the single-section rows a specific ReportDefinition wants.
+// claude: inclusion is decided on the *year* percentage only — per stakeholder
+// claude: request, a student shows up (with both their year and term rows) as soon
+// claude: as their year-to-date attendance drops below the threshold, even if their
+// claude: current term alone would look fine. Year-level filter, category pick,
+// claude: threshold cutoff and sort all live here so reports/*.ts definitions stay
+// claude: pure data.
 export function buildReportData(
-  dataset: AttendanceDataset,
+  yearDataset: AttendanceDataset,
+  termDataset: AttendanceDataset,
   def: ReportDefinition,
 ): AttendanceReportData {
   const threshold = def.threshold ?? DEFAULT_THRESHOLD
   const yearLevels = def.yearLevels
 
   const scoped = yearLevels
-    ? dataset.students.filter((s) =>
+    ? yearDataset.students.filter((s) =>
       s.yearLevel !== null && yearLevels.includes(s.yearLevel)
     )
-    : dataset.students
+    : yearDataset.students
+
+  const termByStudent = new Map(termDataset.students.map((s) => [s.compassPersonId, s]))
 
   const rows: AbsenceRow[] = scoped
     .filter((s) => {
@@ -491,21 +547,20 @@ export function buildReportData(
       name: s.name,
       studentCode: s.studentCode,
       yearLevel: s.yearLevel,
-      attendancePercentage: s[def.category].percentage,
-      daysAny: s[def.category].daysAny,
-      daysFull: s[def.category].daysFull,
-      trend: s[def.category].trend,
+      year: toPeriodMetrics(s, def.category),
+      term: toPeriodMetrics(termByStudent.get(s.compassPersonId), def.category),
       statusGroupCounts: s.statusGroupCounts,
     }))
 
   return {
     title: def.title,
-    periodName: dataset.periodName,
-    periodStart: dataset.periodStart,
-    periodEnd: dataset.periodEnd,
-    totalStudents: dataset.totalStudents,
+    periodName: yearDataset.periodName,
+    periodStart: yearDataset.periodStart,
+    periodEnd: yearDataset.periodEnd,
+    totalStudents: yearDataset.totalStudents,
+    threshold,
     rows,
-    dailyBreakdown: null,
+    dailyBreakdown: [],
   }
 }
 
@@ -514,10 +569,11 @@ export function buildReportData(
 // claude: email. report.ts (CSV/console output) has no use for the daily table, so
 // claude: it calls buildReportData directly and stays synchronous.
 export async function buildFullReportData(
-  dataset: AttendanceDataset,
+  yearDataset: AttendanceDataset,
+  termDataset: AttendanceDataset,
   def: ReportDefinition,
 ): Promise<AttendanceReportData> {
-  const data = buildReportData(dataset, def)
+  const data = buildReportData(yearDataset, termDataset, def)
   const dailyBreakdown = await getDailyPeriodBreakdown(def)
   return { ...data, dailyBreakdown }
 }
