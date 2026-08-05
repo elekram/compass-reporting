@@ -5,11 +5,9 @@ services:
     user: "${HOST_UID}:${HOST_GID}"
     environment:
       DENO_DIR: /app/.deno-cache
-    ports:
-      - ${PORT1}:443
     working_dir: /app
     command: >
-      sh -c "deno task run"
+      sh -c "deno task cron"
     volumes:
       - ./:/app
     depends_on:
