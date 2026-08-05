@@ -9,9 +9,9 @@ import {
 } from './compass-api.types.ts'
 
 // claude: every Compass endpoint wraps its payload in a top-level "d". These three
-// claude: envelope shapes were confirmed by running main.ts against the live API —
-// claude: see the transcript. Kept local to this file since they're a fetch-layer
-// claude: concern, not a domain type.
+// claude: envelope shapes were confirmed against the live API (see compass-query.ts
+// claude: for ad-hoc spot-checks). Kept local to this file since they're a
+// claude: fetch-layer concern, not a domain type.
 interface CompassApiResponseEnvelope<T> {
   d: {
     __type: string

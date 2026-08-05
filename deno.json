@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "run": "deno run -A --env-file=./deno.env main.ts",
+    "query": "deno run -A --env-file=./deno.env compass-query.ts",
     "sync": "deno run -A --env-file=./deno.env sync.ts",
     "report": "deno run -A --env-file=./deno.env report.ts",
     "email-preview": "deno run -A --env-file=./deno.env email-preview.ts",
