@@ -2,8 +2,13 @@ import sql from './db.ts'
 import {
   attendanceGetPeriodLinesBetweenBounds,
   attendanceGetStatuses,
+  personGetStudentsBasic,
 } from './api/compass-api.ts'
-import { AttendanceStatus, PeriodAttendanceLine } from './api/compass-api.types.ts'
+import {
+  AttendanceStatus,
+  PeriodAttendanceLine,
+  StudentBasic,
+} from './api/compass-api.types.ts'
 import config from './config/config.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
@@ -148,11 +153,49 @@ async function upsertStatuses(statuses: AttendanceStatus[]) {
   `
 }
 
+// claude: student roster is a small, non-paginated list (not per-row data like
+// claude: period_lines), so — same as statuses — it's just refreshed in full on every
+// claude: sync run rather than tracked incrementally. Cached so report generation
+// claude: (send-report.ts et al.) reads names/codes/year levels from Postgres instead
+// claude: of making its own live Compass calls on every send.
+async function upsertStudents(students: StudentBasic[]) {
+  const rows = students.map((student) => ({
+    compass_person_id: student.compassPersonId,
+    first_name: student.firstName,
+    last_name: student.lastName,
+    student_code: student.studentCode,
+    year_level: student.yearLevel,
+  }))
+
+  await sql`
+    INSERT INTO students ${
+    sql(
+      rows,
+      'compass_person_id',
+      'first_name',
+      'last_name',
+      'student_code',
+      'year_level',
+    )
+  }
+    ON CONFLICT (compass_person_id) DO UPDATE SET
+      first_name = excluded.first_name,
+      last_name = excluded.last_name,
+      student_code = excluded.student_code,
+      year_level = excluded.year_level,
+      updated_at = now()
+  `
+}
+
 const today = new Date().toISOString().substring(0, 10)
 
 const statuses = await attendanceGetStatuses()
 await upsertStatuses(statuses)
 console.log(`sync.ts: upserted ${statuses.length} statuses`)
+
+const students = await personGetStudentsBasic()
+await upsertStudents(students)
+console.log(`sync.ts: upserted ${students.length} students`)
 
 const syncState = await getSyncState()
 

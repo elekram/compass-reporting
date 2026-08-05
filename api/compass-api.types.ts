@@ -275,6 +275,18 @@ export interface StudentBasic {
   yearLevel: string
 }
 
+// claude: the subset of StudentBasic actually consumed by reporting (see
+// claude: assembleAttendanceReport) — matches the columns cached in Postgres'
+// claude: `students` table (see sync.ts), which mirrors a live personGetStudentsBasic
+// claude: call structurally so either can be passed where this is expected.
+export interface StudentRosterEntry {
+  compassPersonId: string
+  firstName: string
+  lastName: string
+  studentCode: string | null
+  yearLevel: string | null
+}
+
 // claude: flat, CSV-ready row combining a PeriodAttendanceLine with its matching
 // claude: StudentBasic (joined on compassPersonId) and AttendanceStatus (joined on
 // claude: prevalentOverallStatusId -> statusId). See assembleAttendanceReport

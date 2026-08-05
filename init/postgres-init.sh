@@ -46,4 +46,16 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
                 parent_selectable boolean NOT NULL,
                 staff_selectable boolean NOT NULL
         );
+
+        -- cached personGetStudentsBasic roster (name/code/year level), refreshed in
+        -- full on every sync run so report generation can join against Postgres
+        -- instead of making its own live Compass calls on every send
+        CREATE TABLE students (
+                compass_person_id text PRIMARY KEY,
+                first_name text NOT NULL,
+                last_name text NOT NULL,
+                student_code text,
+                year_level text,
+                updated_at timestamptz NOT NULL DEFAULT now()
+        );
 EOSQL

@@ -1,6 +1,7 @@
 import {
   AbsenceRow,
   AttendanceReportData,
+  AWAY_STREAK_HIGHLIGHT_THRESHOLD,
   DailyBreakdownData,
   DailyCellKind,
   DailyPeriodCell,
@@ -247,16 +248,28 @@ function renderDailyCell(cell: DailyPeriodCell): string {
   }${escapeHtml(label)}</td>`
 }
 
+// claude: per-stakeholder request, students away every period for more than
+// claude: AWAY_STREAK_HIGHLIGHT_THRESHOLD consecutive school days (ending on this
+// claude: table's date) get their name/code cells highlighted with the streak length
+// claude: shown, so a coordinator can spot a chronic absence at a glance rather than
+// claude: cross-referencing several days' tables by eye.
 function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
-  return rows.map((row) => `
+  return rows.map((row) => {
+    const isChronic = row.awayStreakDays > AWAY_STREAK_HIGHLIGHT_THRESHOLD
+    const bgcolor = isChronic ? " bgcolor='#fdecea'" : ''
+    const streakBadge = isChronic
+      ? ` <span style='color: #c0392b; font-weight: bold;'>(${row.awayStreakDays} days)</span>`
+      : ''
+    return `
                 <tr>
-                  <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left;'>${
-    escapeHtml(row.name)
-  }</td>
-                  <td style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #666666; text-align: left;'>${
-    escapeHtml(row.studentCode ?? '-')
-  }</td>${row.cells.map(renderDailyCell).join('')}
-                </tr>`).join('')
+                  <td${bgcolor} style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #000000; text-align: left;'>${
+      escapeHtml(row.name)
+    }${streakBadge}</td>
+                  <td${bgcolor} style='padding: 6px 10px; font-family: sans-serif; font-size: 14px; color: #666666; text-align: left;'>${
+      escapeHtml(row.studentCode ?? '-')
+    }</td>${row.cells.map(renderDailyCell).join('')}
+                </tr>`
+  }).join('')
 }
 
 // claude: daily.date is a plain calendar date (no time component) — parsing it as
@@ -328,6 +341,10 @@ function renderDailyLegend(): string {
                 <tr>
                   <td style='padding: 3px 10px 3px 0px; font-family: sans-serif; font-size: 11px; font-weight: bold; color: #283747; text-align: left; white-space: nowrap;'>UN</td>
                   <td style='padding: 3px 0px; font-family: sans-serif; font-size: 11px; color: #666666; text-align: left;'>Unscheduled.</td>
+                </tr>
+                <tr>
+                  <td bgcolor='#fdecea' style='padding: 3px 10px 3px 0px; font-family: sans-serif; font-size: 11px; color: #c0392b; text-align: left; white-space: nowrap;'>&nbsp;</td>
+                  <td style='padding: 3px 0px; font-family: sans-serif; font-size: 11px; color: #666666; text-align: left;'>Highlighted on the most recent day = away every period for more than ${AWAY_STREAK_HIGHLIGHT_THRESHOLD} consecutive school days.</td>
                 </tr>
               </table>
             </td>

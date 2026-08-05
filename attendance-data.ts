@@ -1,5 +1,4 @@
 import sql from './db.ts'
-import { personGetStudentsBasic } from './api/compass-api.ts'
 import {
   assembleAttendanceReport,
   calculateAttendancePercentages,
@@ -11,7 +10,7 @@ import {
   AttendanceStatus,
   PeriodAttendanceLine,
   StudentAttendancePercentage,
-  StudentBasic,
+  StudentRosterEntry,
 } from './api/compass-api.types.ts'
 import { Period } from './config/config.ts'
 import { AbsenceCategory, ReportDefinition } from './reports/types.ts'
@@ -64,7 +63,21 @@ export interface DailyBreakdownRow {
   name: string
   studentCode: string | null
   cells: DailyPeriodCell[]
+  // claude: consecutive fully-absent school days ending on (and including) this
+  // table's date — only computed for the most recent day's table (see
+  // getDailyPeriodBreakdown), 0 everywhere else so the template's ">threshold"
+  // highlight check is a harmless no-op on older days.
+  awayStreakDays: number
 }
+
+// claude: "more than three days in a row" per stakeholder request — a student's
+// awayStreakDays must exceed this (i.e. be 4+) to be highlighted.
+export const AWAY_STREAK_HIGHLIGHT_THRESHOLD = 3
+
+// claude: how many school days back the streak walk is willing to look — generous
+// upper bound (~8 school weeks) so a genuinely long absence isn't cut short, without
+// scanning the whole dataset for students who were only away for a day or two.
+const AWAY_STREAK_LOOKBACK_DAYS = 40
 
 // claude: null when the owning ReportDefinition didn't opt in (dailyPeriodBreakdown
 // claude: unset) or no complete day was found yet to report on.
@@ -161,6 +174,36 @@ function toAttendanceStatus(row: StatusRow): AttendanceStatus {
     parentSelectable: row.parent_selectable,
     staffSelectable: row.staff_selectable,
   }
+}
+
+interface StudentRow {
+  compass_person_id: string
+  first_name: string
+  last_name: string
+  student_code: string | null
+  year_level: string | null
+}
+
+function toStudentRosterEntry(row: StudentRow): StudentRosterEntry {
+  return {
+    compassPersonId: row.compass_person_id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    studentCode: row.student_code,
+    yearLevel: row.year_level,
+  }
+}
+
+// claude: reads the roster cached by sync.ts's upsertStudents instead of making a
+// claude: live personGetStudentsBasic call — every report-generation entry point
+// claude: below uses this rather than hitting Compass directly, so a send-report run
+// claude: only ever depends on Compass being up at sync time, not at send time.
+async function queryStudentRoster(): Promise<StudentRosterEntry[]> {
+  const rows: StudentRow[] = await sql`
+    SELECT compass_person_id, first_name, last_name, student_code, year_level
+    FROM students
+  `
+  return rows.map(toStudentRosterEntry)
 }
 
 function toPeriodAttendanceLine(row: PeriodLineRow): PeriodAttendanceLine {
@@ -269,11 +312,104 @@ function classifyDailyCode(code: string | null): DailyCellKind {
 // claude: covers — per stakeholder request, was 1 (just "yesterday").
 const DAILY_BREAKDOWN_DAYS = 3
 
+interface AwayStreakLineRow {
+  compass_person_id: string
+  day: Date
+  period_code: string
+  prevalent_overall_status_id: string
+}
+
+// claude: walks backward, school day by school day, from `mostRecentDay`, counting
+// claude: how many consecutive days each candidate student was away every one of the
+// claude: 6 teaching periods that day (same "every period flagged" test the Full Days
+// claude: metric elsewhere uses) — stops at the first day that isn't a full absence,
+// claude: or at the edge of AWAY_STREAK_LOOKBACK_DAYS/available school days.
+async function computeAwayStreaks(
+  mostRecentDay: string,
+  candidateIds: string[],
+  statusById: Map<string, StatusRow>,
+  def: ReportDefinition,
+): Promise<Map<string, number>> {
+  if (candidateIds.length === 0) {
+    return new Map()
+  }
+
+  const inclusionIds = def.category === 'unexplained'
+    ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
+    : new Set(
+      [...REPORTABLE_STATUS_EXPORT_IDS].filter((id) =>
+        id !== UNEXPLAINED_STATUS_EXPORT_ID
+      ),
+    )
+
+  const schoolDays = await findMostRecentCompleteDays(AWAY_STREAK_LOOKBACK_DAYS)
+  // claude: findMostRecentCompleteDays looks backward from "now", not from
+  // claude: mostRecentDay — in normal operation mostRecentDay is schoolDays[0], but
+  // claude: this guards against drift (e.g. a new day completing between the two
+  // claude: calls) by anchoring the walk to mostRecentDay's own position.
+  const startIndex = schoolDays.indexOf(mostRecentDay)
+  const walkDays = startIndex === -1 ? [] : schoolDays.slice(startIndex)
+  if (walkDays.length === 0) {
+    return new Map()
+  }
+
+  const rangeStart = walkDays[walkDays.length - 1]
+  const rows: AwayStreakLineRow[] = await sql`
+    SELECT compass_person_id, (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date AS day,
+           period_code, prevalent_overall_status_id
+    FROM period_lines
+    WHERE compass_person_id = ANY(${candidateIds})
+      AND teaching_time = true
+      AND period_code = ANY(${TEACHING_PERIOD_CODES})
+      AND (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date >= ${rangeStart}
+      AND (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date <= ${mostRecentDay}
+  `
+
+  const codesByKey = new Map<string, Map<string, string | null>>()
+  for (const row of rows) {
+    const dayIso = row.day.toISOString().substring(0, 10)
+    const key = `${row.compass_person_id}|${dayIso}`
+    if (!codesByKey.has(key)) {
+      codesByKey.set(key, new Map())
+    }
+    const status = statusById.get(row.prevalent_overall_status_id)
+    codesByKey.get(key)!.set(
+      row.period_code,
+      status?.school_system_export_identifier ?? null,
+    )
+  }
+
+  function isFullyAway(studentId: string, day: string): boolean {
+    const periods = codesByKey.get(`${studentId}|${day}`)
+    if (!periods) {
+      return false
+    }
+    return TEACHING_PERIOD_CODES.every((code) => {
+      const exportId = periods.get(code)
+      return exportId != null && inclusionIds.has(exportId)
+    })
+  }
+
+  const streaks = new Map<string, number>()
+  for (const studentId of candidateIds) {
+    let streak = 0
+    for (const day of walkDays) {
+      if (!isFullyAway(studentId, day)) {
+        break
+      }
+      streak++
+    }
+    streaks.set(studentId, streak)
+  }
+  return streaks
+}
+
 async function buildDailyBreakdownForDay(
   day: string,
   statusById: Map<string, StatusRow>,
-  studentById: Map<string, StudentBasic>,
+  studentById: Map<string, StudentRosterEntry>,
   def: ReportDefinition,
+  computeAwayStreak: boolean,
 ): Promise<DailyBreakdownData> {
   const lines = await queryPeriodLinesForLocalDay(day)
 
@@ -300,13 +436,21 @@ async function buildDailyBreakdownForDay(
       ),
     )
 
-  const rows: DailyBreakdownRow[] = []
+  const candidates: {
+    compassPersonId: string
+    name: string
+    studentCode: string | null
+    cells: DailyPeriodCell[]
+  }[] = []
   for (const [compassPersonId, studentLines] of linesByStudent) {
     const student = studentById.get(compassPersonId)
     if (!student) {
       continue
     }
-    if (def.yearLevels && !def.yearLevels.includes(student.yearLevel)) {
+    if (
+      def.yearLevels &&
+      (student.yearLevel === null || !def.yearLevels.includes(student.yearLevel))
+    ) {
       continue
     }
 
@@ -325,14 +469,31 @@ async function buildDailyBreakdownForDay(
       continue
     }
 
-    rows.push({
+    candidates.push({
+      compassPersonId,
       name: `${student.firstName} ${student.lastName}`.trim(),
       studentCode: student.studentCode,
       cells: codes.map((code) => ({ code, kind: classifyDailyCode(code) })),
     })
   }
 
-  rows.sort((a, b) => a.name.localeCompare(b.name))
+  candidates.sort((a, b) => a.name.localeCompare(b.name))
+
+  const streaks = computeAwayStreak
+    ? await computeAwayStreaks(
+      day,
+      candidates.map((c) => c.compassPersonId),
+      statusById,
+      def,
+    )
+    : new Map<string, number>()
+
+  const rows: DailyBreakdownRow[] = candidates.map((c) => ({
+    name: c.name,
+    studentCode: c.studentCode,
+    cells: c.cells,
+    awayStreakDays: streaks.get(c.compassPersonId) ?? 0,
+  }))
 
   return { date: day, rows }
 }
@@ -357,15 +518,17 @@ export async function getDailyPeriodBreakdown(
     return []
   }
 
-  const [statusRows, students]: [StatusRow[], StudentBasic[]] = await Promise.all([
+  const [statusRows, students]: [StatusRow[], StudentRosterEntry[]] = await Promise.all([
     sql<StatusRow[]>`SELECT * FROM statuses`,
-    personGetStudentsBasic(),
+    queryStudentRoster(),
   ])
   const statusById = new Map(statusRows.map((s) => [s.status_id, s]))
   const studentById = new Map(students.map((s) => [s.compassPersonId, s]))
 
   const results = await Promise.all(
-    days.map((day) => buildDailyBreakdownForDay(day, statusById, studentById, def)),
+    days.map((day, index) =>
+      buildDailyBreakdownForDay(day, statusById, studentById, def, index === 0)
+    ),
   )
 
   return results.filter((result) => result.rows.length > 0)
@@ -402,7 +565,7 @@ interface TrendPair {
 // claude: exactly.
 async function getTrends(
   statuses: AttendanceStatus[],
-  students: Awaited<ReturnType<typeof personGetStudentsBasic>>,
+  students: StudentRosterEntry[],
 ): Promise<Map<string, TrendPair>> {
   const todayExclusive = addDaysIso(isoDateDaysAgo(0), 1)
   const currentStart = isoDateDaysAgo(TREND_WINDOW_DAYS)
@@ -474,7 +637,7 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
 
   const [statusRows, students] = await Promise.all([
     sql<StatusRow[]>`SELECT * FROM statuses`,
-    personGetStudentsBasic(),
+    queryStudentRoster(),
   ])
   const statuses = statusRows.map(toAttendanceStatus)
 
@@ -483,9 +646,9 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
   const percentages = calculateAttendancePercentages(assembled)
   const trends = await getTrends(statuses, students)
 
-  // claude: unmatched students (no StudentBasic join — see the ~97% match rate
-  // claude: caveat) are dropped here rather than shown as blank rows, since they
-  // claude: aren't actionable for a coordinator without a name.
+  // claude: unmatched students (no roster join — see the ~97% match rate caveat on
+  // claude: personGetStudentsBasic) are dropped here rather than shown as blank rows,
+  // claude: since they aren't actionable for a coordinator without a name.
   const matched = percentages.filter((p) => p.firstName !== null)
 
   return {

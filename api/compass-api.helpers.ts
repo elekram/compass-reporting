@@ -3,17 +3,18 @@ import {
   AttendanceStatus,
   PeriodAttendanceLine,
   StudentAttendancePercentage,
-  StudentBasic,
+  StudentRosterEntry,
 } from './compass-api.types.ts'
 
 // claude: joins the three Compass endpoints into one flat row per period attendance
-// claude: line: student identity via compassPersonId (using StudentBasic — better
-// claude: match rate than the full Person object, see getStudentsBasic), status
-// claude: detail via prevalentOverallStatusId -> statusId.
+// claude: line: student identity via compassPersonId (originally a live
+// claude: personGetStudentsBasic call — better match rate than the full Person object
+// claude: — now the cached `students` table, see attendance-data.ts's
+// claude: queryStudentRoster), status detail via prevalentOverallStatusId -> statusId.
 export function assembleAttendanceReport(
   periodLines: PeriodAttendanceLine[],
   statuses: AttendanceStatus[],
-  students: StudentBasic[],
+  students: StudentRosterEntry[],
 ): AssembledAttendancePeriodLine[] {
   const statusById = new Map(
     statuses.map((status) => [status.statusId, status]),
@@ -32,10 +33,13 @@ export function assembleAttendanceReport(
       ...lineFields,
       firstName: student?.firstName ?? null,
       lastName: student?.lastName ?? null,
-      preferredFirstName: student?.preferredFirstName ?? null,
-      middleName: student?.middleName ?? null,
-      username: student?.username ?? null,
-      gender: student?.gender ?? null,
+      // claude: not part of the cached roster (see StudentRosterEntry) — nothing
+      // claude: downstream reads these, so they're always null rather than pulled
+      // claude: from a live API call just to populate an unused field.
+      preferredFirstName: null,
+      middleName: null,
+      username: null,
+      gender: null,
       yearLevel: student?.yearLevel ?? null,
       studentCode: student?.studentCode ?? null,
       statusName: status?.name ?? null,
