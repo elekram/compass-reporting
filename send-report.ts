@@ -1,6 +1,10 @@
 import sql from './db.ts'
 import config from './config/config.ts'
-import { buildFullReportData, getStudentAttendance } from './attendance-data.ts'
+import {
+  buildFullReportData,
+  buildSubjectLine,
+  getStudentAttendance,
+} from './attendance-data.ts'
 import reports, { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
 import { sendMail } from './mailer.ts'
@@ -38,29 +42,9 @@ const [yearDataset, termDataset] = await Promise.all([
 ])
 const data = await buildFullReportData(yearDataset, termDataset, def)
 
-// claude: subject format per stakeholder request: "[Absences] Year 12 Fri 31/07/2026".
-// claude: falls back to the report title when there's no single year level or no
-// claude: daily breakdown date to anchor the subject to (e.g. whole-school reports).
-function subjectLine(): string {
-  const yearLabel = def.yearLevels?.length === 1 ? `Year ${def.yearLevels[0]}` : def.title
-  // claude: subject is anchored to the most recent day in the breakdown (index 0 —
-  // claude: see findMostRecentCompleteDays' descending order), even though the
-  // claude: table itself now covers DAILY_BREAKDOWN_DAYS days.
-  const mostRecentDay = data.dailyBreakdown[0]
-  if (!mostRecentDay) return `[Absences] ${yearLabel}`
-  const [y, m, d] = mostRecentDay.date.split('-')
-  const weekday = new Date(`${mostRecentDay.date}T00:00:00Z`).toLocaleDateString(
-    'en-US',
-    {
-      weekday: 'short',
-      timeZone: 'UTC',
-    },
-  )
-  return `[Absences] ${yearLabel} ${weekday} ${d}/${m}/${y}`
-}
-
 const html = emailTemplate(data)
-const subject = subjectLine()
+// claude: shared with cron.ts — see buildSubjectLine in attendance-data.ts.
+const subject = buildSubjectLine(def, data)
 await sendMail({ to, subject, html })
 console.log(`Sent "${subject}" to ${to.join(', ')}`)
 

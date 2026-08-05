@@ -740,3 +740,28 @@ export async function buildFullReportData(
   const dailyBreakdown = await getDailyPeriodBreakdown(def)
   return { ...data, dailyBreakdown }
 }
+
+// claude: shared by send-report.ts (manual/CLI sends) and cron.ts (scheduled sends)
+// claude: so the subject format can't drift between the two paths. Anchored to the
+// claude: most recent day in the daily breakdown (not "today") — see
+// claude: findMostRecentCompleteDays — falls back to just the report label when
+// claude: there's no daily breakdown (e.g. whole-school reports, which don't opt in).
+export function buildSubjectLine(
+  def: ReportDefinition,
+  data: AttendanceReportData,
+): string {
+  const yearLabel = def.yearLevels?.length === 1 ? `Year ${def.yearLevels[0]}` : def.title
+  const mostRecentDay = data.dailyBreakdown[0]
+  if (!mostRecentDay) {
+    return `[Absences] ${yearLabel}`
+  }
+  const [y, m, d] = mostRecentDay.date.split('-')
+  const weekday = new Date(`${mostRecentDay.date}T00:00:00Z`).toLocaleDateString(
+    'en-US',
+    {
+      weekday: 'short',
+      timeZone: 'UTC',
+    },
+  )
+  return `[Absences] ${yearLabel} ${weekday} ${d}/${m}/${y}`
+}

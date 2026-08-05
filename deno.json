@@ -4,7 +4,8 @@
     "sync": "deno run -A --env-file=./deno.env sync.ts",
     "report": "deno run -A --env-file=./deno.env report.ts",
     "email-preview": "deno run -A --env-file=./deno.env email-preview.ts",
-    "send-report": "deno run -A --env-file=./deno.env send-report.ts"
+    "send-report": "deno run -A --env-file=./deno.env send-report.ts",
+    "cron": "deno run -A --unstable-cron --env-file=./deno.env cron.ts"
   },
   "fmt": {
     "semiColons": false,

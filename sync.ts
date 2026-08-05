@@ -371,23 +371,38 @@ function renderSyncFailureEmail(error: unknown): { subject: string; html: string
   return { subject: `[Compass Sync] FAILED — ${currentStage}`, html }
 }
 
-let summary: SyncSummary | undefined
-let syncError: unknown
+// claude: runs the sync and always emails the outcome — reused by both this file's
+// claude: own CLI entry point (deno task sync) and cron.ts's scheduled daily job, so
+// claude: there's one place that decides "sync happened, here's what to tell Mark."
+// claude: Deliberately does NOT call sql.end() or Deno.exit — cron.ts keeps the same
+// claude: process (and DB pool) alive for months between runs, so only a genuine
+// claude: one-shot CLI invocation (see the import.meta.main block below) may do that.
+export async function runSyncAndEmail(): Promise<{ ok: boolean }> {
+  let summary: SyncSummary | undefined
+  let syncError: unknown
 
-try {
-  summary = await runSync()
-} catch (error) {
-  syncError = error
-} finally {
-  await sql.end()
+  try {
+    summary = await runSync()
+  } catch (error) {
+    syncError = error
+  }
+
+  const { subject, html } = syncError
+    ? renderSyncFailureEmail(syncError)
+    : renderSyncSummaryEmail(summary!)
+  await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
+
+  if (syncError) {
+    console.error('sync.ts: sync failed:', syncError)
+  }
+
+  return { ok: !syncError }
 }
 
-const { subject, html } = syncError
-  ? renderSyncFailureEmail(syncError)
-  : renderSyncSummaryEmail(summary!)
-await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
-
-if (syncError) {
-  console.error('sync.ts: sync failed:', syncError)
-  Deno.exit(1)
+if (import.meta.main) {
+  const { ok } = await runSyncAndEmail()
+  await sql.end()
+  if (!ok) {
+    Deno.exit(1)
+  }
 }
