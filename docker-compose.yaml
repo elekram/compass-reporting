@@ -2,7 +2,7 @@ services:
   web:
     image: denoland/deno:2.8.1
     restart: always
-    user: "${HOST_UID}:${HOST_GID}"
+    user: '${HOST_UID}:${HOST_GID}'
     environment:
       DENO_DIR: /app/.deno-cache
     working_dir: /app
@@ -13,6 +13,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
   postgres:
     image: postgres:18.3
     restart: always
@@ -25,9 +29,13 @@ services:
       - pgdata_compassReports:/var/lib/postgresql
       - ./init/postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 volumes:
   pgdata_compassReports:
