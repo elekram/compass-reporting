@@ -10,6 +10,8 @@ import {
   StudentBasic,
 } from './api/compass-api.types.ts'
 import config from './config/config.ts'
+import mailConfig from './config/mail-config.ts'
+import { sendMail } from './mailer.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
 
@@ -187,100 +189,205 @@ async function upsertStudents(students: StudentBasic[]) {
   `
 }
 
-const today = new Date().toISOString().substring(0, 10)
+interface SyncSummary {
+  startedAt: string
+  finishedAt: string
+  statusesCount: number
+  studentsCount: number
+  periodLinesSynced: number
+  trailingResyncSynced: number
+  modifiedSinceTimestamp: string
+  watermark: string | null
+}
 
-const statuses = await attendanceGetStatuses()
-await upsertStatuses(statuses)
-console.log(`sync.ts: upserted ${statuses.length} statuses`)
+// claude: updated at the start of each phase in runSync — read by the failure email
+// claude: (see renderSyncFailureEmail) so a scheduled run that dies mid-sync says
+// claude: plainly which phase it was in ("fetching students from Compass") rather
+// claude: than making the reader infer that from a stack trace pointing at internal
+// claude: function names.
+let currentStage = 'starting up'
 
-const students = await personGetStudentsBasic()
-await upsertStudents(students)
-console.log(`sync.ts: upserted ${students.length} students`)
+async function runSync(): Promise<SyncSummary> {
+  const startedAt = new Date().toISOString()
+  const today = startedAt.substring(0, 10)
 
-const syncState = await getSyncState()
+  currentStage = 'fetching statuses from Compass'
+  const statuses = await attendanceGetStatuses()
+  await upsertStatuses(statuses)
+  console.log(`sync.ts: upserted ${statuses.length} statuses`)
 
-let modifiedSinceTimestamp: string
-let startSkip = 0
+  currentStage = 'fetching students from Compass'
+  const students = await personGetStudentsBasic()
+  await upsertStudents(students)
+  console.log(`sync.ts: upserted ${students.length} students`)
 
-if (syncState) {
-  modifiedSinceTimestamp = syncState.lastSyncedTimestamp
-} else {
-  // claude: no completed sync on record yet — still working through the initial
-  // claude: historical backfill. Resume pagination from where period_lines currently
-  // claude: sits rather than re-fetching from skip=0: safe because we keep using the
-  // claude: same fixed FIRST_SYNC_TIMESTAMP bound (not a computed watermark) and
-  // claude: upserts are idempotent on period_line_id, so continuing the same
-  // claude: deterministic request sequence can't skip or duplicate rows.
-  modifiedSinceTimestamp = FIRST_SYNC_TIMESTAMP
-  const [{ count }] = await sql<
-    [{ count: string }]
-  >`SELECT count(*)::text FROM period_lines`
-  startSkip = Number(count)
-  if (startSkip > 0) {
-    console.log(
-      `sync.ts: no completed sync on record — resuming initial backfill from skip=${startSkip}`,
-    )
+  currentStage = 'reading sync watermark from Postgres'
+  const syncState = await getSyncState()
+
+  let modifiedSinceTimestamp: string
+  let startSkip = 0
+
+  if (syncState) {
+    modifiedSinceTimestamp = syncState.lastSyncedTimestamp
+  } else {
+    // claude: no completed sync on record yet — still working through the initial
+    // claude: historical backfill. Resume pagination from where period_lines currently
+    // claude: sits rather than re-fetching from skip=0: safe because we keep using the
+    // claude: same fixed FIRST_SYNC_TIMESTAMP bound (not a computed watermark) and
+    // claude: upserts are idempotent on period_line_id, so continuing the same
+    // claude: deterministic request sequence can't skip or duplicate rows.
+    modifiedSinceTimestamp = FIRST_SYNC_TIMESTAMP
+    const [{ count }] = await sql<
+      [{ count: string }]
+    >`SELECT count(*)::text FROM period_lines`
+    startSkip = Number(count)
+    if (startSkip > 0) {
+      console.log(
+        `sync.ts: no completed sync on record — resuming initial backfill from skip=${startSkip}`,
+      )
+    }
+  }
+
+  console.log(`sync.ts: syncing period lines modified since ${modifiedSinceTimestamp}`)
+
+  currentStage = 'syncing period lines from Compass (incremental)'
+  let syncedCount = 0
+
+  await attendanceGetPeriodLinesBetweenBounds(
+    config.year.start,
+    today,
+    modifiedSinceTimestamp,
+    async (page) => {
+      await upsertPeriodLines(page)
+      syncedCount += page.length
+      console.log(`sync.ts: upserted ${syncedCount} period lines so far`)
+    },
+    startSkip,
+  )
+
+  console.log(`sync.ts: done, upserted ${syncedCount} period lines total`)
+
+  // claude: unconditional — ignores modifiedSinceTimestamp entirely (passes
+  // claude: FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
+  // claude: regardless of when it was last modified, not just ones Compass reports as
+  // claude: recently changed. See the TRAILING_RESYNC_DAYS comment for why the
+  // claude: watermark-based sync above can't be trusted to have caught everything on
+  // claude: its own. Idempotent (upsert on period_line_id), so re-fetching rows we
+  // claude: already have is just wasted bandwidth, not a correctness risk.
+  const trailingStart = new Date()
+  trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
+  const trailingStartIso = trailingStart.toISOString().substring(0, 10)
+
+  console.log(
+    `sync.ts: running trailing resync for ${trailingStartIso} to ${today} (self-heals rows the sync above may have silently dropped)`,
+  )
+
+  currentStage = 'running trailing resync from Compass'
+  let trailingSyncedCount = 0
+
+  await attendanceGetPeriodLinesBetweenBounds(
+    trailingStartIso,
+    today,
+    FIRST_SYNC_TIMESTAMP,
+    async (page) => {
+      await upsertPeriodLines(page)
+      trailingSyncedCount += page.length
+      console.log(
+        `sync.ts: trailing resync upserted ${trailingSyncedCount} period lines so far`,
+      )
+    },
+  )
+
+  console.log(
+    `sync.ts: trailing resync done, upserted ${trailingSyncedCount} period lines total`,
+  )
+
+  currentStage = 'recording sync watermark'
+  const [{ max }] = await sql<[{ max: string | null }]>`
+    SELECT max(updated_timestamp) AS max FROM period_lines
+  `
+  if (max) {
+    await markSyncComplete(max)
+    console.log(`sync.ts: recorded completed sync watermark ${max}`)
+  }
+
+  return {
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    statusesCount: statuses.length,
+    studentsCount: students.length,
+    periodLinesSynced: syncedCount,
+    trailingResyncSynced: trailingSyncedCount,
+    modifiedSinceTimestamp,
+    watermark: max,
   }
 }
 
-console.log(`sync.ts: syncing period lines modified since ${modifiedSinceTimestamp}`)
+function renderSyncSummaryEmail(summary: SyncSummary): { subject: string; html: string } {
+  const rows: [string, string][] = [
+    ['Started', summary.startedAt],
+    ['Finished', summary.finishedAt],
+    ['Statuses upserted', String(summary.statusesCount)],
+    ['Students upserted', String(summary.studentsCount)],
+    ['Period lines synced (incremental)', String(summary.periodLinesSynced)],
+    ['Period lines synced (trailing resync)', String(summary.trailingResyncSynced)],
+    ['Synced since', summary.modifiedSinceTimestamp],
+    ['New watermark', summary.watermark ?? '(unchanged — no period lines in range)'],
+  ]
 
-let syncedCount = 0
+  const html = `
+    <div style="font-family: sans-serif; font-size: 14px; color: #000;">
+      <p><b>Compass sync completed successfully.</b></p>
+      <table cellpadding="4" cellspacing="0" border="0">
+        ${
+    rows.map(([label, value]) =>
+      `<tr><td style="color: #666;">${label}</td><td><b>${value}</b></td></tr>`
+    ).join('')
+  }
+      </table>
+    </div>
+  `
 
-await attendanceGetPeriodLinesBetweenBounds(
-  config.year.start,
-  today,
-  modifiedSinceTimestamp,
-  async (page) => {
-    await upsertPeriodLines(page)
-    syncedCount += page.length
-    console.log(`sync.ts: upserted ${syncedCount} period lines so far`)
-  },
-  startSkip,
-)
-
-console.log(`sync.ts: done, upserted ${syncedCount} period lines total`)
-
-// claude: unconditional — ignores modifiedSinceTimestamp entirely (passes
-// claude: FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
-// claude: regardless of when it was last modified, not just ones Compass reports as
-// claude: recently changed. See the TRAILING_RESYNC_DAYS comment for why the
-// claude: watermark-based sync above can't be trusted to have caught everything on
-// claude: its own. Idempotent (upsert on period_line_id), so re-fetching rows we
-// claude: already have is just wasted bandwidth, not a correctness risk.
-const trailingStart = new Date()
-trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
-const trailingStartIso = trailingStart.toISOString().substring(0, 10)
-
-console.log(
-  `sync.ts: running trailing resync for ${trailingStartIso} to ${today} (self-heals rows the sync above may have silently dropped)`,
-)
-
-let trailingSyncedCount = 0
-
-await attendanceGetPeriodLinesBetweenBounds(
-  trailingStartIso,
-  today,
-  FIRST_SYNC_TIMESTAMP,
-  async (page) => {
-    await upsertPeriodLines(page)
-    trailingSyncedCount += page.length
-    console.log(
-      `sync.ts: trailing resync upserted ${trailingSyncedCount} period lines so far`,
-    )
-  },
-)
-
-console.log(
-  `sync.ts: trailing resync done, upserted ${trailingSyncedCount} period lines total`,
-)
-
-const [{ max }] = await sql<[{ max: string | null }]>`
-  SELECT max(updated_timestamp) AS max FROM period_lines
-`
-if (max) {
-  await markSyncComplete(max)
-  console.log(`sync.ts: recorded completed sync watermark ${max}`)
+  return { subject: '[Compass Sync] OK', html }
 }
 
-await sql.end()
+function renderSyncFailureEmail(error: unknown): { subject: string; html: string } {
+  const message = error instanceof Error ? error.message : String(error)
+  const stack = error instanceof Error ? error.stack ?? '' : ''
+
+  const html = `
+    <div style="font-family: sans-serif; font-size: 14px; color: #000;">
+      <p><b style="color: #c0392b;">Compass sync FAILED.</b></p>
+      <p>Failed while: <b>${currentStage}</b></p>
+      <p>${message}</p>
+      ${
+    stack
+      ? `<pre style="font-size: 12px; color: #666; white-space: pre-wrap;">${stack}</pre>`
+      : ''
+  }
+    </div>
+  `
+
+  return { subject: `[Compass Sync] FAILED — ${currentStage}`, html }
+}
+
+let summary: SyncSummary | undefined
+let syncError: unknown
+
+try {
+  summary = await runSync()
+} catch (error) {
+  syncError = error
+} finally {
+  await sql.end()
+}
+
+const { subject, html } = syncError
+  ? renderSyncFailureEmail(syncError)
+  : renderSyncSummaryEmail(summary!)
+await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
+
+if (syncError) {
+  console.error('sync.ts: sync failed:', syncError)
+  Deno.exit(1)
+}

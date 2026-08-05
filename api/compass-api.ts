@@ -49,7 +49,7 @@ async function fetchWithRetry(
   retries = 3,
   timeoutMs = 60000,
 ): Promise<Response> {
-  for (let attempt = 0; ; attempt++) {
+  for (let attempt = 0;; attempt++) {
     try {
       return await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
     } catch (error) {
@@ -67,11 +67,27 @@ async function fetchWithRetry(
   }
 }
 
+// claude: a bad/expired API key, Compass maintenance, or a rate limit used to fail
+// claude: deep inside JSON.parse or a ".map on undefined" a step later — useless in a
+// claude: failure-alert email (see sync.ts's summary email). This surfaces the actual
+// claude: HTTP status/body from the endpoint that failed instead.
+async function textOrThrow(response: Response, endpoint: string): Promise<string> {
+  const data = await response.text()
+  if (!response.ok) {
+    throw new Error(
+      `Compass API request to ${endpoint} failed: ${response.status} ${response.statusText} — ${
+        data.slice(0, 500)
+      }`,
+    )
+  }
+  return data
+}
+
 export function getHeaders() {
   const h = new Headers()
   const key = Deno.env.get('COMPASS_API_KEY')
   if (!key) {
-    throw new Error('no api key')
+    throw new Error('COMPASS_API_KEY is not set in deno.env')
   }
 
   h.append('Content-Type', 'application/json')
@@ -122,8 +138,15 @@ export async function attendanceGetStatuses(): Promise<
     },
   )
 
-  const data = await response.text()
+  const data = await textOrThrow(response, endpoint)
   const parsed: CompassFlatArrayEnvelope<AttendanceStatus> = JSON.parse(data)
+  if (!Array.isArray(parsed.d)) {
+    throw new Error(
+      `Compass API ${endpoint} returned an unexpected shape (expected an array in "d"): ${
+        data.slice(0, 500)
+      }`,
+    )
+  }
   return parsed.d
 }
 
@@ -166,10 +189,24 @@ export async function attendanceGetPeriodLinesBetweenBounds(
       },
     )
 
-    const data = await response.text()
+    const data = await textOrThrow(response, endpoint)
     const parsed: CompassApiResponseEnvelope<PeriodAttendanceLine> = JSON.parse(
       data,
     )
+    if (parsed.d?.success === false) {
+      throw new Error(
+        `Compass API ${endpoint} reported failure: ${
+          parsed.d.errorMessage ?? '(no error message)'
+        }`,
+      )
+    }
+    if (!Array.isArray(parsed.d?.data)) {
+      throw new Error(
+        `Compass API ${endpoint} returned an unexpected shape (expected an array in "d.data"): ${
+          data.slice(0, 500)
+        }`,
+      )
+    }
     lines.push(...parsed.d.data)
     total = parsed.d.total
     skip += take
@@ -286,7 +323,14 @@ export async function personGetStudentsBasic(): Promise<Array<StudentBasic>> {
     },
   )
 
-  const data = await response.text()
+  const data = await textOrThrow(response, endpoint)
   const parsed: CompassFlatArrayEnvelope<StudentBasic> = JSON.parse(data)
+  if (!Array.isArray(parsed.d)) {
+    throw new Error(
+      `Compass API ${endpoint} returned an unexpected shape (expected an array in "d"): ${
+        data.slice(0, 500)
+      }`,
+    )
+  }
   return parsed.d
 }
