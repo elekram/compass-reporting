@@ -16,7 +16,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
   postgres:
     image: postgres:18.3
     restart: always
