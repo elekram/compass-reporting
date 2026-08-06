@@ -63,7 +63,10 @@ function renderBar(percentage: number | null): string {
   }
   const filled = Math.max(0, Math.min(100, Math.round(percentage)))
   const empty = 100 - filled
-  const color = barColor(filled)
+  // claude: color must come from the raw percentage, not `filled` — rounding first
+  // claude: (e.g. 84.7 -> 85) could cross a colour-band boundary and show green for
+  // claude: a student who's actually still below the threshold.
+  const color = barColor(percentage)
   return `
           <table width='180' border='0' cellpadding='0' cellspacing='0' style='border-collapse: collapse;'>
             <tr>${
