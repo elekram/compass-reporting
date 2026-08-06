@@ -166,6 +166,12 @@ export async function attendanceGetPeriodLinesBetweenBounds(
 > {
   const endpoint = '/API/V4/Attendance/GetPeriodLinesTracking'
   const take = 1000
+  // claude: only accumulated when there's no onPage callback — sync.ts's production
+  // claude: callers pass onPage and persist each page straight to Postgres, never
+  // claude: touching the return value, so holding the entire result (a full first-sync
+  // claude: backfill can be 500k+ rows) in memory on top of that would be pure waste.
+  // claude: compass-query.ts's ad-hoc CLI is the only caller that wants the array back,
+  // claude: and it never passes onPage.
   const lines: PeriodAttendanceLine[] = []
   let skip = startSkip
   let total = Infinity
@@ -212,7 +218,9 @@ export async function attendanceGetPeriodLinesBetweenBounds(
         }`,
       )
     }
-    lines.push(...parsed.d.data)
+    if (!onPage) {
+      lines.push(...parsed.d.data)
+    }
     total = parsed.d.total
     skip += take
     const fetched = Math.min(skip, total)
