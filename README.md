@@ -136,6 +136,19 @@ Two things worth knowing about `Deno.cron` in general:
   running at the scheduled moment (a host reboot, a deliberate restart), that day's run
   simply doesn't happen; nothing backfills it.
 
+## Logging
+
+`logger.ts` writes every log line to both stdout (visible via `docker compose logs`) and a
+timestamped file under `logs/` (gitignored, created on first run). Both `sync.ts`'s own
+CLI entry point and `cron.ts`'s daily job wrap themselves in a run — `sync.ts` produces
+`logs/sync-<timestamp>.log`, `cron.ts` produces `logs/cron-daily-<timestamp>.log` covering
+the sync **and** every report send that follows it in the same file. Every Compass API
+response (including each page of the paginated period-lines fetch, with a running
+`fetched X/Y (Z%)` progress indicator) is logged as it happens, not just at the end of a
+run. The sync summary/failure email also includes the log file's path for that run. Files
+older than 30 days are pruned automatically at the start of each run, so `logs/` doesn't
+grow unbounded.
+
 ## Configuration files
 
 - `config/config.ts` — term/semester/year date ranges for the current school year.

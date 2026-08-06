@@ -9,6 +9,7 @@ import {
 import { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
 import { sendMail } from './mailer.ts'
+import { endRun, log, logError, startRun } from './logger.ts'
 
 const MELBOURNE_TIMEZONE = 'Australia/Melbourne'
 
@@ -33,6 +34,9 @@ async function sendScheduledReports() {
     getStudentAttendance(config.getCurrentTerm()),
   ])
 
+  const enabledReports = cronConfig.reports.filter((entry) => entry.enabled)
+  let sentCount = 0
+
   for (const entry of cronConfig.reports) {
     if (!entry.enabled) {
       continue
@@ -42,9 +46,7 @@ async function sendScheduledReports() {
       ? cronConfig.debugRecipients
       : entry.recipients
     if (recipients.length === 0) {
-      console.log(
-        `cron.ts: skipping "${entry.reportId}" — no recipients configured`,
-      )
+      log(`cron.ts: skipping "${entry.reportId}" — no recipients configured`)
       continue
     }
 
@@ -54,22 +56,33 @@ async function sendScheduledReports() {
     const subject = buildSubjectLine(def, data)
 
     await sendMail({ to: recipients, subject, html })
-    console.log(`cron.ts: sent "${subject}" to ${recipients.join(', ')}`)
+    sentCount++
+    log(
+      `cron.ts: sent "${subject}" to ${
+        recipients.join(', ')
+      } (${sentCount}/${enabledReports.length})`,
+    )
   }
 }
 
 async function runDailyJob() {
-  console.log('cron.ts: daily job starting (sync)')
-  const { ok } = await runSyncAndEmail()
+  const logPath = startRun('cron-daily')
+  log(`cron.ts: daily job starting, logging to ${logPath}`)
 
-  if (!ok) {
-    console.error('cron.ts: sync failed — skipping report sends')
-    return
+  try {
+    const { ok } = await runSyncAndEmail()
+
+    if (!ok) {
+      logError('cron.ts: sync failed — skipping report sends')
+      return
+    }
+
+    log('cron.ts: sync ok, sending scheduled reports')
+    await sendScheduledReports()
+    log('cron.ts: daily job complete')
+  } finally {
+    endRun()
   }
-
-  console.log('cron.ts: sync ok, sending scheduled reports')
-  await sendScheduledReports()
-  console.log('cron.ts: daily job complete')
 }
 
 // claude: Deno.cron schedules are UTC-only (see docs.deno.com/runtime/fundamentals/

@@ -6,3 +6,4 @@ deno.env
 /.deno-cache
 /*.csv
 /email-templates/preview-*.html
+/logs

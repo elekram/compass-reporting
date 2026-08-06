@@ -12,6 +12,7 @@ import {
 import config from './config/config.ts'
 import mailConfig from './config/mail-config.ts'
 import { sendMail } from './mailer.ts'
+import { endRun, log, logError, startRun } from './logger.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
 
@@ -214,12 +215,12 @@ async function runSync(): Promise<SyncSummary> {
   currentStage = 'fetching statuses from Compass'
   const statuses = await attendanceGetStatuses()
   await upsertStatuses(statuses)
-  console.log(`sync.ts: upserted ${statuses.length} statuses`)
+  log(`sync.ts: upserted ${statuses.length} statuses`)
 
   currentStage = 'fetching students from Compass'
   const students = await personGetStudentsBasic()
   await upsertStudents(students)
-  console.log(`sync.ts: upserted ${students.length} students`)
+  log(`sync.ts: upserted ${students.length} students`)
 
   currentStage = 'reading sync watermark from Postgres'
   const syncState = await getSyncState()
@@ -242,13 +243,13 @@ async function runSync(): Promise<SyncSummary> {
     >`SELECT count(*)::text FROM period_lines`
     startSkip = Number(count)
     if (startSkip > 0) {
-      console.log(
+      log(
         `sync.ts: no completed sync on record — resuming initial backfill from skip=${startSkip}`,
       )
     }
   }
 
-  console.log(`sync.ts: syncing period lines modified since ${modifiedSinceTimestamp}`)
+  log(`sync.ts: syncing period lines modified since ${modifiedSinceTimestamp}`)
 
   currentStage = 'syncing period lines from Compass (incremental)'
   let syncedCount = 0
@@ -260,12 +261,12 @@ async function runSync(): Promise<SyncSummary> {
     async (page) => {
       await upsertPeriodLines(page)
       syncedCount += page.length
-      console.log(`sync.ts: upserted ${syncedCount} period lines so far`)
+      log(`sync.ts: upserted ${syncedCount} period lines so far`)
     },
     startSkip,
   )
 
-  console.log(`sync.ts: done, upserted ${syncedCount} period lines total`)
+  log(`sync.ts: done, upserted ${syncedCount} period lines total`)
 
   // claude: unconditional — ignores modifiedSinceTimestamp entirely (passes
   // claude: FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
@@ -278,7 +279,7 @@ async function runSync(): Promise<SyncSummary> {
   trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
   const trailingStartIso = trailingStart.toISOString().substring(0, 10)
 
-  console.log(
+  log(
     `sync.ts: running trailing resync for ${trailingStartIso} to ${today} (self-heals rows the sync above may have silently dropped)`,
   )
 
@@ -292,13 +293,13 @@ async function runSync(): Promise<SyncSummary> {
     async (page) => {
       await upsertPeriodLines(page)
       trailingSyncedCount += page.length
-      console.log(
+      log(
         `sync.ts: trailing resync upserted ${trailingSyncedCount} period lines so far`,
       )
     },
   )
 
-  console.log(
+  log(
     `sync.ts: trailing resync done, upserted ${trailingSyncedCount} period lines total`,
   )
 
@@ -308,7 +309,7 @@ async function runSync(): Promise<SyncSummary> {
   `
   if (max) {
     await markSyncComplete(max)
-    console.log(`sync.ts: recorded completed sync watermark ${max}`)
+    log(`sync.ts: recorded completed sync watermark ${max}`)
   }
 
   return {
@@ -323,7 +324,10 @@ async function runSync(): Promise<SyncSummary> {
   }
 }
 
-function renderSyncSummaryEmail(summary: SyncSummary): { subject: string; html: string } {
+function renderSyncSummaryEmail(
+  summary: SyncSummary,
+  logPath: string,
+): { subject: string; html: string } {
   const rows: [string, string][] = [
     ['Started', summary.startedAt],
     ['Finished', summary.finishedAt],
@@ -333,6 +337,7 @@ function renderSyncSummaryEmail(summary: SyncSummary): { subject: string; html: 
     ['Period lines synced (trailing resync)', String(summary.trailingResyncSynced)],
     ['Synced since', summary.modifiedSinceTimestamp],
     ['New watermark', summary.watermark ?? '(unchanged — no period lines in range)'],
+    ['Log file', logPath],
   ]
 
   const html = `
@@ -351,7 +356,10 @@ function renderSyncSummaryEmail(summary: SyncSummary): { subject: string; html: 
   return { subject: '[Compass Sync] OK', html }
 }
 
-function renderSyncFailureEmail(error: unknown): { subject: string; html: string } {
+function renderSyncFailureEmail(
+  error: unknown,
+  logPath: string,
+): { subject: string; html: string } {
   const message = error instanceof Error ? error.message : String(error)
   const stack = error instanceof Error ? error.stack ?? '' : ''
 
@@ -360,6 +368,7 @@ function renderSyncFailureEmail(error: unknown): { subject: string; html: string
       <p><b style="color: #c0392b;">Compass sync FAILED.</b></p>
       <p>Failed while: <b>${currentStage}</b></p>
       <p>${message}</p>
+      <p>Log file: <code>${logPath}</code></p>
       ${
     stack
       ? `<pre style="font-size: 12px; color: #666; white-space: pre-wrap;">${stack}</pre>`
@@ -378,25 +387,34 @@ function renderSyncFailureEmail(error: unknown): { subject: string; html: string
 // claude: process (and DB pool) alive for months between runs, so only a genuine
 // claude: one-shot CLI invocation (see the import.meta.main block below) may do that.
 export async function runSyncAndEmail(): Promise<{ ok: boolean }> {
-  let summary: SyncSummary | undefined
-  let syncError: unknown
+  const logPath = startRun('sync')
+  log(`sync.ts: run starting, logging to ${logPath}`)
 
   try {
-    summary = await runSync()
-  } catch (error) {
-    syncError = error
+    let summary: SyncSummary | undefined
+    let syncError: unknown
+
+    try {
+      summary = await runSync()
+    } catch (error) {
+      syncError = error
+    }
+
+    const { subject, html } = syncError
+      ? renderSyncFailureEmail(syncError, logPath)
+      : renderSyncSummaryEmail(summary!, logPath)
+    await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
+
+    if (syncError) {
+      logError('sync.ts: sync failed', syncError)
+    } else {
+      log('sync.ts: run complete')
+    }
+
+    return { ok: !syncError }
+  } finally {
+    endRun()
   }
-
-  const { subject, html } = syncError
-    ? renderSyncFailureEmail(syncError)
-    : renderSyncSummaryEmail(summary!)
-  await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
-
-  if (syncError) {
-    console.error('sync.ts: sync failed:', syncError)
-  }
-
-  return { ok: !syncError }
 }
 
 if (import.meta.main) {

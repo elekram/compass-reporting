@@ -7,6 +7,7 @@ import {
   PeriodAttendanceLine,
   StudentBasic,
 } from './compass-api.types.ts'
+import { log } from '../logger.ts'
 
 // claude: every Compass endpoint wraps its payload in a top-level "d". These three
 // claude: envelope shapes were confirmed against the live API (see compass-query.ts
@@ -57,7 +58,7 @@ async function fetchWithRetry(
         throw error
       }
       const backoffMs = 1000 * 2 ** attempt
-      console.log(
+      log(
         `fetchWithRetry: attempt ${attempt + 1} failed (${
           error instanceof Error ? error.message : error
         }), retrying in ${backoffMs}ms`,
@@ -120,6 +121,7 @@ export async function attendanceGetPeriodLines(): Promise<
   )
 
   const data = await response.text()
+  log(`attendanceGetPeriodLines: ${endpoint} responded ${response.status}`)
   return JSON.parse(data)
 }
 
@@ -147,6 +149,9 @@ export async function attendanceGetStatuses(): Promise<
       }`,
     )
   }
+  log(
+    `attendanceGetStatuses: ${endpoint} responded ${response.status}, ${parsed.d.length} statuses`,
+  )
   return parsed.d
 }
 
@@ -210,10 +215,10 @@ export async function attendanceGetPeriodLinesBetweenBounds(
     lines.push(...parsed.d.data)
     total = parsed.d.total
     skip += take
-    console.log(
-      `attendanceGetPeriodLinesBetweenBounds: fetched ${
-        Math.min(skip, total)
-      }/${total} rows`,
+    const fetched = Math.min(skip, total)
+    const percent = total > 0 ? ((fetched / total) * 100).toFixed(1) : '100.0'
+    log(
+      `attendanceGetPeriodLinesBetweenBounds: ${endpoint} responded ${response.status}, page of ${parsed.d.data.length} rows — fetched ${fetched}/${total} (${percent}%)`,
     )
     if (onPage) {
       await onPage(parsed.d.data)
@@ -244,6 +249,7 @@ export async function attendanceGetLines(start: string, end: string): Promise<
   )
 
   const data = await response.text()
+  log(`attendanceGetLines: ${endpoint} responded ${response.status}`)
   return JSON.parse(data)
 }
 
@@ -273,6 +279,7 @@ export async function chronicleGetChronicleEntries(): Promise<
   )
 
   const data = await response.text()
+  log(`chronicleGetChronicleEntries: ${endpoint} responded ${response.status}`)
   return JSON.parse(data)
 }
 
@@ -294,6 +301,7 @@ export async function referenceGetFormGroup(): Promise<Array<FormGroup>> {
   )
 
   const data = await response.text()
+  log(`referenceGetFormGroup: ${endpoint} responded ${response.status}`)
   return JSON.parse(data)
 }
 
@@ -332,5 +340,8 @@ export async function personGetStudentsBasic(): Promise<Array<StudentBasic>> {
       }`,
     )
   }
+  log(
+    `personGetStudentsBasic: ${endpoint} responded ${response.status}, ${parsed.d.length} students`,
+  )
   return parsed.d
 }
