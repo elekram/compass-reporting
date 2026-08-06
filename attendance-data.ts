@@ -336,11 +336,7 @@ async function computeAwayStreaks(
 
   const inclusionIds = def.category === 'unexplained'
     ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
-    : new Set(
-      [...REPORTABLE_STATUS_EXPORT_IDS].filter((id) =>
-        id !== UNEXPLAINED_STATUS_EXPORT_ID
-      ),
-    )
+    : REPORTABLE_STATUS_EXPORT_IDS
 
   const schoolDays = await findMostRecentCompleteDays(AWAY_STREAK_LOOKBACK_DAYS)
   // claude: findMostRecentCompleteDays looks backward from "now", not from
@@ -425,16 +421,13 @@ async function buildDailyBreakdownForDay(
     linesByStudent.get(line.compassPersonId)!.push(line)
   }
 
-  // claude: "flagged" scoped to the report's own category — explained reports only
-  // claude: pull a student in for an explained code, unexplained reports only for
-  // claude: the unexplained one — same split calculateAttendancePercentages uses.
+  // claude: unexplained reports pull a student in only for the unexplained code;
+  // claude: explained reports pull a student in for any reportable code, including
+  // claude: unexplained (500) — per stakeholder request, the daily breakdown table
+  // claude: should surface unexplained periods alongside explained ones.
   const inclusionIds = def.category === 'unexplained'
     ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
-    : new Set(
-      [...REPORTABLE_STATUS_EXPORT_IDS].filter((id) =>
-        id !== UNEXPLAINED_STATUS_EXPORT_ID
-      ),
-    )
+    : REPORTABLE_STATUS_EXPORT_IDS
 
   const candidates: {
     compassPersonId: string
