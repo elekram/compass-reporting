@@ -25,6 +25,17 @@ function currentMelbourneTime(): string {
   })
 }
 
+// claude: school days only — Compass itself doesn't move on weekends, so a
+// claude: Saturday/Sunday run would just re-sync an unchanged window and send
+// claude: reports with nothing new to say.
+function isMelbourneWeekday(): boolean {
+  const day = new Date().toLocaleDateString('en-AU', {
+    timeZone: MELBOURNE_TIMEZONE,
+    weekday: 'short',
+  })
+  return day !== 'Sat' && day !== 'Sun'
+}
+
 // claude: sends every enabled report in cronConfig.reports, sequentially, against
 // claude: one shared year/term dataset fetch — mirrors send-report.ts's per-report
 // claude: flow but loops instead of taking a single report id from argv.
@@ -94,6 +105,10 @@ async function runDailyJob() {
 // claude: of two ticks racing each other.
 Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
   if (currentMelbourneTime() !== cronConfig.runTimeLocal) {
+    return
+  }
+  if (!isMelbourneWeekday()) {
+    log('cron.ts: skipping — weekend')
     return
   }
   await runDailyJob()
