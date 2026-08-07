@@ -614,6 +614,12 @@ export default function emailTemplate(data: AttendanceReportData): string {
             </td>
           </tr>
           <tr>
+            <td class='innerpadding'
+              style='padding: 10px 0px 0px 0px; font-family: sans-serif; font-size: 13px; color: #c0392b;'>
+              Note: this email may be clipped due to its length &mdash; click "View entire message" at the bottom to see the full report.
+            </td>
+          </tr>
+          <tr>
             <td class='innerpadding borderbottom'
               style='padding: 15px 0px 10px 0px;border-bottom: 0px solid #f2eeed; font-family: sans-serif; font-size: 16px;'>
               ${formatDateDdMmYyyySlash(data.periodStart)} to ${
