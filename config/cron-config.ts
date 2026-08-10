@@ -15,7 +15,7 @@ const cronConfig = {
   // claude: so it stays correct across the AEST/AEDT changeover without needing a
   // claude: manual twice-yearly adjustment. Must land on a 5-minute mark (:00/:05/
   // claude: :10/etc) to actually line up with that tick.
-  runTimeLocal: '10:00',
+  runTimeLocal: '07:30',
 
   // claude: while true, every report email cron.ts sends goes to debugRecipients
   // claude: instead of that report's own `recipients` — lets you test the full daily
@@ -34,17 +34,26 @@ const cronConfig = {
     {
       reportId: 'explained-absences-year-7',
       enabled: true,
-      recipients: ['middleschoolcoordinators@cheltsec.vic.edu.au'],
+      recipients: [
+        'middleschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+      ],
     },
     {
       reportId: 'explained-absences-year-8',
       enabled: true,
-      recipients: ['middleschoolcoordinators@cheltsec.vic.edu.au'],
+      recipients: [
+        'middleschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+      ],
     },
     {
       reportId: 'explained-absences-year-9',
       enabled: true,
-      recipients: ['middleschoolcoordinators@cheltsec.vic.edu.au'],
+      recipients: [
+        'middleschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+      ],
     },
     {
       reportId: 'explained-absences-year-10',
@@ -54,12 +63,18 @@ const cronConfig = {
     {
       reportId: 'explained-absences-year-11',
       enabled: true,
-      recipients: ['seniorschoolcoordinators@cheltsec.vic.edu.au'],
+      recipients: [
+        'seniorschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+      ],
     },
     {
       reportId: 'explained-absences-year-12',
       enabled: true,
-      recipients: ['seniorschoolcoordinators@cheltsec.vic.edu.au'],
+      recipients: [
+        'seniorschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+      ],
     },
     // claude: whole-school reports — off by default, not part of the year-level
     // claude: cadence this was built for. Flip on once there's a real audience for
