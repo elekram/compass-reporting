@@ -37,6 +37,7 @@ const cronConfig = {
       recipients: [
         'middleschoolcoordinators@cheltsec.vic.edu.au',
         'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
       ],
     },
     {
@@ -45,6 +46,7 @@ const cronConfig = {
       recipients: [
         'middleschoolcoordinators@cheltsec.vic.edu.au',
         'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
       ],
     },
     {
@@ -53,12 +55,17 @@ const cronConfig = {
       recipients: [
         'middleschoolcoordinators@cheltsec.vic.edu.au',
         'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
       ],
     },
     {
       reportId: 'explained-absences-year-10',
       enabled: true,
-      recipients: ['seniorschoolcoordinators@cheltsec.vic.edu.au'],
+      recipients: [
+        'seniorschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
     },
     {
       reportId: 'explained-absences-year-11',
@@ -66,6 +73,7 @@ const cronConfig = {
       recipients: [
         'seniorschoolcoordinators@cheltsec.vic.edu.au',
         'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
       ],
     },
     {
@@ -74,6 +82,7 @@ const cronConfig = {
       recipients: [
         'seniorschoolcoordinators@cheltsec.vic.edu.au',
         'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
       ],
     },
     // claude: whole-school reports — off by default, not part of the year-level

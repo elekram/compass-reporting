@@ -28,6 +28,27 @@ const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
 // claude: every run until it's within this window.
 const TRAILING_RESYNC_DAYS = 14
 
+const SCHOOL_TIMEZONE = 'Australia/Melbourne'
+
+// claude: the API's uBound is sent as `${end}T00:00:00Z` — an *instant*, not a local
+// claude: calendar date (see attendanceGetPeriodLinesBetweenBounds) — so an `end` of
+// claude: "2026-08-10" actually closes the window at 10am/11am Melbourne on the 10th,
+// claude: not at local midnight. This used to be handed new Date().toISOString()'s UTC
+// claude: date, which made it worse: the 07:30 Melbourne job runs at 21:30 UTC the
+// claude: *previous* day, so `end` resolved to the previous UTC date and the window
+// claude: shut at 10am on the very day being reported — periods 3-6 were never fetched
+// claude: and rendered as "Unscheduled" in the daily breakdown. Taking today's
+// claude: Melbourne date and adding a day puts the boundary at 10am tomorrow local,
+// claude: safely past the end of today's last period, whatever the DST offset is.
+function syncWindowEnd(): string {
+  const melbourneToday = new Date().toLocaleDateString('en-CA', {
+    timeZone: SCHOOL_TIMEZONE,
+  })
+  const end = new Date(`${melbourneToday}T00:00:00Z`)
+  end.setUTCDate(end.getUTCDate() + 1)
+  return end.toISOString().substring(0, 10)
+}
+
 // claude: sync_state is only ever written after a run fully completes (see bottom of
 // claude: this file), so reading it back is always safe — unlike computing
 // claude: MAX(updated_timestamp) live from period_lines, which would be poisoned by a
@@ -210,7 +231,7 @@ let currentStage = 'starting up'
 
 async function runSync(): Promise<SyncSummary> {
   const startedAt = new Date().toISOString()
-  const today = startedAt.substring(0, 10)
+  const windowEnd = syncWindowEnd()
 
   currentStage = 'fetching statuses from Compass'
   const statuses = await attendanceGetStatuses()
@@ -256,7 +277,7 @@ async function runSync(): Promise<SyncSummary> {
 
   await attendanceGetPeriodLinesBetweenBounds(
     config.year.start,
-    today,
+    windowEnd,
     modifiedSinceTimestamp,
     async (page) => {
       await upsertPeriodLines(page)
@@ -280,7 +301,7 @@ async function runSync(): Promise<SyncSummary> {
   const trailingStartIso = trailingStart.toISOString().substring(0, 10)
 
   log(
-    `sync.ts: running trailing resync for ${trailingStartIso} to ${today} (self-heals rows the sync above may have silently dropped)`,
+    `sync.ts: running trailing resync for ${trailingStartIso} to ${windowEnd} (self-heals rows the sync above may have silently dropped)`,
   )
 
   currentStage = 'running trailing resync from Compass'
@@ -288,7 +309,7 @@ async function runSync(): Promise<SyncSummary> {
 
   await attendanceGetPeriodLinesBetweenBounds(
     trailingStartIso,
-    today,
+    windowEnd,
     FIRST_SYNC_TIMESTAMP,
     async (page) => {
       await upsertPeriodLines(page)
