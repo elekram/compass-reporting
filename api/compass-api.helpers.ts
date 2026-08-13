@@ -6,11 +6,11 @@ import {
   StudentRosterEntry,
 } from './compass-api.types.ts'
 
-// claude: joins the three Compass endpoints into one flat row per period attendance
-// claude: line: student identity via compassPersonId (originally a live
-// claude: personGetStudentsBasic call — better match rate than the full Person object
-// claude: — now the cached `students` table, see attendance-data.ts's
-// claude: queryStudentRoster), status detail via prevalentOverallStatusId -> statusId.
+// joins the three Compass endpoints into one flat row per period attendance
+// line: student identity via compassPersonId (originally a live
+// personGetStudentsBasic call — better match rate than the full Person object
+// — now the cached `students` table, see attendance-data.ts's
+// queryStudentRoster), status detail via prevalentOverallStatusId -> statusId.
 export function assembleAttendanceReport(
   periodLines: PeriodAttendanceLine[],
   statuses: AttendanceStatus[],
@@ -33,9 +33,9 @@ export function assembleAttendanceReport(
       ...lineFields,
       firstName: student?.firstName ?? null,
       lastName: student?.lastName ?? null,
-      // claude: not part of the cached roster (see StudentRosterEntry) — nothing
-      // claude: downstream reads these, so they're always null rather than pulled
-      // claude: from a live API call just to populate an unused field.
+      // not part of the cached roster (see StudentRosterEntry) — nothing
+      // downstream reads these, so they're always null rather than pulled
+      // from a live API call just to populate an unused field.
       preferredFirstName: null,
       middleName: null,
       username: null,
@@ -51,20 +51,20 @@ export function assembleAttendanceReport(
   })
 }
 
-// claude: "500" is Compass's schoolSystemExportIdentifier for the "Unexplained"
-// claude: status.
+// "500" is Compass's schoolSystemExportIdentifier for the "Unexplained"
+// status.
 export const UNEXPLAINED_STATUS_EXPORT_ID = '500'
 
-// claude: "100" is Compass's schoolSystemExportIdentifier for the "Present" status —
-// claude: used to colour the daily period-breakdown table green.
+// "100" is Compass's schoolSystemExportIdentifier for the "Present" status —
+// used to colour the daily period-breakdown table green.
 export const PRESENT_STATUS_EXPORT_ID = '100'
 
-// claude: curated by the stakeholder — the specific countedAbsence reasons worth
-// claude: reporting on. Other countedAbsence statuses (accident, hospitalised,
-// claude: quarantine, suspension, extended family holiday, religious/cultural
-// claude: observance, school choice, the generic P/W codes, etc.) are deliberately
-// claude: excluded from "explained" absence figures even though Compass counts them
-// claude: as absences.
+// curated by the stakeholder — the specific countedAbsence reasons worth
+// reporting on. Other countedAbsence statuses (accident, hospitalised,
+// quarantine, suspension, extended family holiday, religious/cultural
+// observance, school choice, the generic P/W codes, etc.) are deliberately
+// excluded from "explained" absence figures even though Compass counts them
+// as absences.
 export const REPORTABLE_STATUS_EXPORT_IDS = new Set([
   '200',
   '201',
@@ -78,8 +78,8 @@ export const REPORTABLE_STATUS_EXPORT_IDS = new Set([
   '807',
 ])
 
-// claude: stakeholder-specified groupings for the per-student breakdown row —
-// claude: index order here is display order (left to right) in the report.
+// stakeholder-specified groupings for the per-student breakdown row —
+// index order here is display order (left to right) in the report.
 const STATUS_GROUPS: Set<string>[] = [
   new Set(['200', '201', '209']),
   new Set(['208', '300']),
@@ -88,9 +88,9 @@ const STATUS_GROUPS: Set<string>[] = [
   new Set(['807']),
 ]
 
-// claude: only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
-// claude: aren't tracked uniformly across students (see conversation on periodCode
-// claude: coverage), so including them would unevenly pad expectedMinutes.
+// only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
+// aren't tracked uniformly across students (see conversation on periodCode
+// coverage), so including them would unevenly pad expectedMinutes.
 export function calculateAttendancePercentages(
   lines: AssembledAttendancePeriodLine[],
 ): StudentAttendancePercentage[] {

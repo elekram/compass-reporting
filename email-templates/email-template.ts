@@ -16,16 +16,16 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;')
 }
 
-// claude: dateIso is a plain YYYY-MM-DD calendar date, so this is a straight
-// claude: string reshuffle rather than a Date parse — avoids any timezone drift.
+// dateIso is a plain YYYY-MM-DD calendar date, so this is a straight
+// string reshuffle rather than a Date parse — avoids any timezone drift.
 function formatDateDdMmYyyySlash(dateIso: string): string {
   const [y, m, d] = dateIso.split('-')
   return `${d}/${m}/${y}`
 }
 
-// claude: groups preserve the incoming row order (rows arrive pre-sorted ascending
-// claude: by attendancePercentage from getAttendanceReportData), so each year-level
-// claude: bucket ends up sorted by percentage without needing to re-sort here.
+// groups preserve the incoming row order (rows arrive pre-sorted ascending
+// by attendancePercentage from getAttendanceReportData), so each year-level
+// bucket ends up sorted by percentage without needing to re-sort here.
 function groupByYearLevel(rows: AbsenceRow[]): Array<[string, AbsenceRow[]]> {
   const groups = new Map<string, AbsenceRow[]>()
   for (const row of rows) {
@@ -50,7 +50,7 @@ function groupByYearLevel(rows: AbsenceRow[]): Array<[string, AbsenceRow[]]> {
   return orderedKeys.map((key) => [key, groups.get(key)!])
 }
 
-// claude: bands set by stakeholder request — 85%+ green, 80-85% orange, below 80% red.
+// bands set by stakeholder request — 85%+ green, 80-85% orange, below 80% red.
 function barColor(percentage: number): string {
   if (percentage < 80) return '#c0392b'
   if (percentage < 85) return '#EC9E26'
@@ -63,9 +63,9 @@ function renderBar(percentage: number | null): string {
   }
   const filled = Math.max(0, Math.min(100, Math.round(percentage)))
   const empty = 100 - filled
-  // claude: color must come from the raw percentage, not `filled` — rounding first
-  // claude: (e.g. 84.7 -> 85) could cross a colour-band boundary and show green for
-  // claude: a student who's actually still below the threshold.
+  // color must come from the raw percentage, not `filled` — rounding first
+  // (e.g. 84.7 -> 85) could cross a colour-band boundary and show green for
+  // a student who's actually still below the threshold.
   const color = barColor(percentage)
   return `
           <table width='180' border='0' cellpadding='0' cellspacing='0' style='border-collapse: collapse;'>
@@ -91,8 +91,8 @@ function renderTrend(trend: number | null): string {
   return `<span style='color: ${color};'>${arrow} ${sign}${trend}%</span>`
 }
 
-// claude: display labels for row.statusGroupCounts — order and grouping must match
-// claude: STATUS_GROUPS in api/compass-api.helpers.ts, which is the source of truth.
+// display labels for row.statusGroupCounts — order and grouping must match
+// STATUS_GROUPS in api/compass-api.helpers.ts, which is the source of truth.
 const STATUS_GROUP_LABELS = ['200/201/209', '208/300', '211/212', '500/806', '807']
 
 function renderDetailRow(statusGroupCounts: number[]): string {
@@ -117,12 +117,12 @@ function renderDetailRow(statusGroupCounts: number[]): string {
       </tr>`
 }
 
-// claude: shared cells for a period's (Year or Term) sub-row — everything after
-// claude: the leading Name/Code/Trend cells, which only the Year sub-row renders
-// claude: (with rowspan='2') so they aren't repeated per period. Trend lives there
-// claude: rather than per-row because it's always relative to today (see
-// claude: TREND_WINDOW_DAYS), not to the row's own period — the Year and Term rows
-// claude: would otherwise show the same number twice.
+// shared cells for a period's (Year or Term) sub-row — everything after
+// the leading Name/Code/Trend cells, which only the Year sub-row renders
+// (with rowspan='2') so they aren't repeated per period. Trend lives there
+// rather than per-row because it's always relative to today (see
+// TREND_WINDOW_DAYS), not to the row's own period — the Year and Term rows
+// would otherwise show the same number twice.
 function renderPeriodCells(label: string, metrics: PeriodMetrics): string {
   return `
         <td style='padding: 6px 10px; font-family: sans-serif; font-size: 13px; color: #666666; text-align: left; width: 90px; white-space: nowrap;'>${
@@ -183,8 +183,8 @@ function renderYearLevelTable(
           </tr>`
 }
 
-// claude: colours are advisory (background + text), not semantic elsewhere — chosen
-// claude: per stakeholder request so flagged codes "pop" for coordinators.
+// colours are advisory (background + text), not semantic elsewhere — chosen
+// per stakeholder request so flagged codes "pop" for coordinators.
 const DAILY_CELL_BACKGROUND: Record<DailyCellKind, string> = {
   present: '#eafaf1',
   flagged: '#fdedec',
@@ -199,9 +199,9 @@ const DAILY_CELL_TEXT: Record<DailyCellKind, string> = {
   missing: '#999999',
 }
 
-// claude: per-stakeholder-request emoji shown above the code in each daily-breakdown
-// claude: cell. Groupings mirror STATUS_GROUPS (compass-api.helpers.ts) except its
-// claude: last two groups (500/806 and 807) collapse to one emoji here.
+// per-stakeholder-request emoji shown above the code in each daily-breakdown
+// cell. Groupings mirror STATUS_GROUPS (compass-api.helpers.ts) except its
+// last two groups (500/806 and 807) collapse to one emoji here.
 const DAILY_CODE_EMOJI: Record<string, string> = {
   '200': '⚕️',
   '201': '⚕️',
@@ -215,9 +215,9 @@ const DAILY_CODE_EMOJI: Record<string, string> = {
   '807': '🙆',
 }
 
-// claude: hover-tooltip text (title attribute) for each code in a daily-breakdown
-// claude: cell — per stakeholder request. Desktop-only (no hover on mobile mail
-// claude: apps), so it's a supplement to the emoji/colour coding, not a replacement.
+// hover-tooltip text (title attribute) for each code in a daily-breakdown
+// cell — per stakeholder request. Desktop-only (no hover on mobile mail
+// apps), so it's a supplement to the emoji/colour coding, not a replacement.
 const DAILY_CODE_LABEL: Record<string, string> = {
   '0': 'Not Marked',
   '100': 'Present',
@@ -251,11 +251,11 @@ function renderDailyCell(cell: DailyPeriodCell): string {
   }${escapeHtml(label)}</td>`
 }
 
-// claude: per-stakeholder request, students away every period for more than
-// claude: AWAY_STREAK_HIGHLIGHT_THRESHOLD consecutive school days (ending on this
-// claude: table's date) get their name/code cells highlighted with the streak length
-// claude: shown, so a coordinator can spot a chronic absence at a glance rather than
-// claude: cross-referencing several days' tables by eye.
+// per-stakeholder request, students away every period for more than
+// AWAY_STREAK_HIGHLIGHT_THRESHOLD consecutive school days (ending on this
+// table's date) get their name/code cells highlighted with the streak length
+// shown, so a coordinator can spot a chronic absence at a glance rather than
+// cross-referencing several days' tables by eye.
 function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
   return rows.map((row) => {
     const isChronic = row.awayStreakDays > AWAY_STREAK_HIGHLIGHT_THRESHOLD
@@ -275,9 +275,9 @@ function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
   }).join('')
 }
 
-// claude: daily.date is a plain calendar date (no time component) — parsing it as
-// claude: UTC midnight and formatting with timeZone: 'UTC' keeps the weekday tied to
-// claude: that date regardless of the server's own local timezone.
+// daily.date is a plain calendar date (no time component) — parsing it as
+// UTC midnight and formatting with timeZone: 'UTC' keeps the weekday tied to
+// that date regardless of the server's own local timezone.
 function weekdayName(dateIso: string): string {
   return new Date(`${dateIso}T00:00:00Z`).toLocaleDateString('en-US', {
     weekday: 'long',
@@ -313,9 +313,9 @@ function renderDailyDayTable(daily: DailyBreakdownData): string {
           </tr>`
 }
 
-// claude: renders one table per complete day (see DAILY_BREAKDOWN_DAYS in
-// claude: attendance-data.ts), most recent first, with a single shared legend
-// claude: after the last one rather than repeating it per day.
+// renders one table per complete day (see DAILY_BREAKDOWN_DAYS in
+// attendance-data.ts), most recent first, with a single shared legend
+// after the last one rather than repeating it per day.
 function renderDailyBreakdown(days: DailyBreakdownData[]): string {
   if (days.length === 0) {
     return ''
@@ -325,8 +325,8 @@ function renderDailyBreakdown(days: DailyBreakdownData[]): string {
           ${renderDailyLegend()}`
 }
 
-// claude: colour swatch legend for the daily breakdown cells, matching the
-// claude: pattern used for the Bar legend in renderBlurb below.
+// colour swatch legend for the daily breakdown cells, matching the
+// pattern used for the Bar legend in renderBlurb below.
 function renderDailyLegend(): string {
   const swatchRows: [string, string][] = [
     ['#27ae60', 'Present.'],
@@ -354,11 +354,11 @@ function renderDailyLegend(): string {
           </tr>`
 }
 
-// claude: minimal explanation of the table below, shown under the "N Students
-// claude: Below X%" heading per stakeholder request — a compact label/value table
-// claude: rather than a paragraph of prose.
-// claude: small colour swatch (matches barColor's own bands, not the row-inclusion
-// claude: threshold) + label, used inline in the Bar legend row below.
+// minimal explanation of the table below, shown under the "N Students
+// Below X%" heading per stakeholder request — a compact label/value table
+// rather than a paragraph of prose.
+// small colour swatch (matches barColor's own bands, not the row-inclusion
+// threshold) + label, used inline in the Bar legend row below.
 function renderSwatch(color: string, label: string): string {
   return `<td style='padding: 0px 4px 0px 0px;'><table width='12' height='8' border='0' cellpadding='0' cellspacing='0'><tr><td bgcolor='${color}' style='font-size: 1px; line-height: 8px;'>&nbsp;</td></tr></table></td><td style='padding: 0px 10px 0px 0px; font-family: sans-serif; font-size: 11px; color: #666666;'>${
     escapeHtml(label)

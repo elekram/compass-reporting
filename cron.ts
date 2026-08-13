@@ -13,9 +13,9 @@ import { endRun, log, logError, startRun } from './logger.ts'
 
 const MELBOURNE_TIMEZONE = 'Australia/Melbourne'
 
-// claude: "HH:MM" in Melbourne local time, DST-aware via Intl (unlike a fixed UTC
-// claude: cron expression, this doesn't need manual adjustment at the AEST/AEDT
-// claude: changeover — see cronConfig.runTimeLocal).
+// "HH:MM" in Melbourne local time, DST-aware via Intl (unlike a fixed UTC
+// cron expression, this doesn't need manual adjustment at the AEST/AEDT
+// changeover — see cronConfig.runTimeLocal).
 function currentMelbourneTime(): string {
   return new Date().toLocaleTimeString('en-AU', {
     timeZone: MELBOURNE_TIMEZONE,
@@ -25,9 +25,9 @@ function currentMelbourneTime(): string {
   })
 }
 
-// claude: school days only — Compass itself doesn't move on weekends, so a
-// claude: Saturday/Sunday run would just re-sync an unchanged window and send
-// claude: reports with nothing new to say.
+// school days only — Compass itself doesn't move on weekends, so a
+// Saturday/Sunday run would just re-sync an unchanged window and send
+// reports with nothing new to say.
 function isMelbourneWeekday(): boolean {
   const day = new Date().toLocaleDateString('en-AU', {
     timeZone: MELBOURNE_TIMEZONE,
@@ -36,9 +36,9 @@ function isMelbourneWeekday(): boolean {
   return day !== 'Sat' && day !== 'Sun'
 }
 
-// claude: sends every enabled report in cronConfig.reports, sequentially, against
-// claude: one shared year/term dataset fetch — mirrors send-report.ts's per-report
-// claude: flow but loops instead of taking a single report id from argv.
+// sends every enabled report in cronConfig.reports, sequentially, against
+// one shared year/term dataset fetch — mirrors send-report.ts's per-report
+// flow but loops instead of taking a single report id from argv.
 async function sendScheduledReports() {
   const [yearDataset, termDataset] = await Promise.all([
     getStudentAttendance(config.year),
@@ -96,13 +96,13 @@ async function runDailyJob() {
   }
 }
 
-// claude: Deno.cron schedules are UTC-only (see docs.deno.com/runtime/fundamentals/
-// claude: cron) with no timezone parameter, so rather than bake a fixed UTC offset
-// claude: in (which would drift an hour at every AEST/AEDT changeover), this ticks
-// claude: every 5 minutes and only actually runs the job when the Melbourne
-// claude: wall-clock time matches cronConfig.runTimeLocal. Deno.cron guarantees
-// claude: non-overlapping executions of the same job on its own, so there's no risk
-// claude: of two ticks racing each other.
+// Deno.cron schedules are UTC-only (see docs.deno.com/runtime/fundamentals/
+// cron) with no timezone parameter, so rather than bake a fixed UTC offset
+// in (which would drift an hour at every AEST/AEDT changeover), this ticks
+// every 5 minutes and only actually runs the job when the Melbourne
+// wall-clock time matches cronConfig.runTimeLocal. Deno.cron guarantees
+// non-overlapping executions of the same job on its own, so there's no risk
+// of two ticks racing each other.
 Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
   if (currentMelbourneTime() !== cronConfig.runTimeLocal) {
     return
@@ -118,8 +118,8 @@ console.log(
   `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${MELBOURNE_TIMEZONE} (debugMode: ${cronConfig.debugMode})`,
 )
 
-// claude: registering the cron job above is enough to keep the process (and the
-// claude: shared sql pool imported transitively via sync.ts/attendance-data.ts)
-// claude: alive indefinitely — no explicit event-loop keep-alive needed, and unlike
-// claude: sync.ts/send-report.ts, sql.end() is intentionally never called here since
-// claude: this process is meant to run for months, not exit after one job.
+// registering the cron job above is enough to keep the process (and the
+// shared sql pool imported transitively via sync.ts/attendance-data.ts)
+// alive indefinitely — no explicit event-loop keep-alive needed, and unlike
+// sync.ts/send-report.ts, sql.end() is intentionally never called here since
+// this process is meant to run for months, not exit after one job.

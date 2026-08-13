@@ -1,8 +1,8 @@
-// claude: ad-hoc CLI for poking at raw Compass API responses directly — for
-// claude: exploring a new endpoint's shape or spot-checking data without writing a
-// claude: throwaway script and deleting it afterwards. Not part of the sync/report
-// claude: pipeline (see sync.ts/report.ts/send-report.ts) — those go through
-// claude: Postgres, this always hits Compass live.
+// ad-hoc CLI for poking at raw Compass API responses directly — for
+// exploring a new endpoint's shape or spot-checking data without writing a
+// throwaway script and deleting it afterwards. Not part of the sync/report
+// pipeline (see sync.ts/report.ts/send-report.ts) — those go through
+// Postgres, this always hits Compass live.
 import * as compassApi from './api/compass-api.ts'
 
 type Query = (args: string[]) => Promise<unknown>
@@ -12,17 +12,17 @@ const QUERIES: Record<string, Query> = {
   students: () => compassApi.personGetStudentsBasic(),
   'form-groups': () => compassApi.referenceGetFormGroup(),
   chronicle: () => compassApi.chronicleGetChronicleEntries(),
-  // claude: [start, end] as YYYY-MM-DD, e.g. `2026-07-01 2026-08-01`.
+  // [start, end] as YYYY-MM-DD, e.g. `2026-07-01 2026-08-01`.
   lines: ([start, end]) => {
     if (!start || !end) {
       throw new Error('lines requires <start> <end>, e.g. 2026-07-01 2026-08-01')
     }
     return compassApi.attendanceGetLines(start, end)
   },
-  // claude: [start, end, modifiedSinceTimestamp?] — same bounds sync.ts uses, but a
-  // claude: single unpaginated-looking call here (attendanceGetPeriodLinesBetweenBounds
-  // claude: still pages internally, just without sync.ts's onPage/startSkip/self-heal
-  // claude: machinery — this is for looking, not syncing).
+  // [start, end, modifiedSinceTimestamp?] — same bounds sync.ts uses, but a
+  // single unpaginated-looking call here (attendanceGetPeriodLinesBetweenBounds
+  // still pages internally, just without sync.ts's onPage/startSkip/self-heal
+  // machinery — this is for looking, not syncing).
   'period-lines': ([start, end, modifiedSince]) => {
     if (!start || !end) {
       throw new Error(

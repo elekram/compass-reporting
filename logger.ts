@@ -1,9 +1,9 @@
 import { fromFileUrl } from '@std/path'
 
-// claude: resolved from this module's own URL rather than Deno.cwd(), so log files
-// claude: always land in ./logs next to this file regardless of which task/cwd
-// claude: invoked it (matters once this is imported by both sync.ts's own CLI entry
-// claude: and cron.ts's long-running process).
+// resolved from this module's own URL rather than Deno.cwd(), so log files
+// always land in ./logs next to this file regardless of which task/cwd
+// invoked it (matters once this is imported by both sync.ts's own CLI entry
+// and cron.ts's long-running process).
 const LOG_DIR = fromFileUrl(new URL('./logs/', import.meta.url))
 
 let currentFile: Deno.FsFile | null = null
@@ -12,18 +12,18 @@ let depth = 0
 
 const encoder = new TextEncoder()
 
-// claude: cron.ts runs once a day and sync.ts's own CLI entry adds occasional extras
-// claude: on top, so 30 days is roughly a month of history — enough to look back at a
-// claude: past failure without the folder growing forever on an unattended box.
+// cron.ts runs once a day and sync.ts's own CLI entry adds occasional extras
+// on top, so 30 days is roughly a month of history — enough to look back at a
+// past failure without the folder growing forever on an unattended box.
 const LOG_RETENTION_DAYS = 30
 
 function timestamp(): string {
   return new Date().toISOString()
 }
 
-// claude: runs once per fresh file (not on a nested startRun reuse) so a long-lived
-// claude: process like cron.ts still gets pruning applied on each new day's run rather
-// claude: than only at process startup.
+// runs once per fresh file (not on a nested startRun reuse) so a long-lived
+// process like cron.ts still gets pruning applied on each new day's run rather
+// than only at process startup.
 function pruneOldLogs(): number {
   const cutoff = Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
   let removed = 0
@@ -41,10 +41,10 @@ function pruneOldLogs(): number {
   return removed
 }
 
-// claude: reference-counted so a nested call — cron.ts wraps the whole daily job in
-// claude: one log file while sync.ts's own runSyncAndEmail wraps just the sync
-// claude: portion of it — shares that one file instead of the inner startRun/endRun
-// claude: pair closing it out from under the outer caller.
+// reference-counted so a nested call — cron.ts wraps the whole daily job in
+// one log file while sync.ts's own runSyncAndEmail wraps just the sync
+// portion of it — shares that one file instead of the inner startRun/endRun
+// pair closing it out from under the outer caller.
 export function startRun(name: string): string {
   depth++
   if (currentFile && currentPath) {

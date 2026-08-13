@@ -21,8 +21,8 @@ if (!reportId) {
 }
 
 const def = getReport(reportId)
-// claude: CLI-passed emails override the report's default recipients — lets you
-// claude: test a report against yourself without touching its definition.
+// CLI-passed emails override the report's default recipients — lets you
+// test a report against yourself without touching its definition.
 const to = cliRecipients.length > 0 ? cliRecipients : def.recipients
 
 if (!to || to.length === 0) {
@@ -33,9 +33,9 @@ if (!to || to.length === 0) {
   Deno.exit(1)
 }
 
-// claude: report rows always carry both a year and a term figure per student now
-// claude: (see AbsenceRow), so both datasets are fetched unconditionally rather
-// claude: than choosing one via a CLI arg.
+// report rows always carry both a year and a term figure per student now
+// (see AbsenceRow), so both datasets are fetched unconditionally rather
+// than choosing one via a CLI arg.
 const [yearDataset, termDataset] = await Promise.all([
   getStudentAttendance(config.year),
   getStudentAttendance(config.getCurrentTerm()),
@@ -43,7 +43,7 @@ const [yearDataset, termDataset] = await Promise.all([
 const data = await buildFullReportData(yearDataset, termDataset, def)
 
 const html = emailTemplate(data)
-// claude: shared with cron.ts — see buildSubjectLine in attendance-data.ts.
+// shared with cron.ts — see buildSubjectLine in attendance-data.ts.
 const subject = buildSubjectLine(def, data)
 await sendMail({ to, subject, html })
 console.log(`Sent "${subject}" to ${to.join(', ')}`)

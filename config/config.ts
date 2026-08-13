@@ -11,8 +11,8 @@ const terms: Period[] = [
   { name: 'Term 4', start: '2026-10-05', end: '2026-12-18' },
 ]
 
-// claude: Semester 1 = Term 1 + Term 2, Semester 2 = Term 3 + Term 4 — per school
-// claude: convention, not a Compass concept.
+// Semester 1 = Term 1 + Term 2, Semester 2 = Term 3 + Term 4 — per school
+// convention, not a Compass concept.
 const semesters: Period[] = [
   { name: 'Semester 1', start: terms[0].start, end: terms[1].end },
   { name: 'Semester 2', start: terms[2].start, end: terms[3].end },

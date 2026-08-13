@@ -15,43 +15,43 @@ import {
 import { Period } from './config/config.ts'
 import { AbsenceCategory, ReportDefinition } from './reports/types.ts'
 
-// claude: trend windows are always relative to today, independent of whatever
-// claude: report period (term/year) is being generated — a coordinator wants to
-// claude: know recent momentum regardless of how far back the report itself looks.
+// trend windows are always relative to today, independent of whatever
+// report period (term/year) is being generated — a coordinator wants to
+// know recent momentum regardless of how far back the report itself looks.
 const TREND_WINDOW_DAYS = 14
 
-// claude: default row-inclusion cutoff on attendance %, used unless a
-// claude: ReportDefinition overrides it — also the band edge the email template
-// claude: colours green/orange/red around.
+// default row-inclusion cutoff on attendance %, used unless a
+// ReportDefinition overrides it — also the band edge the email template
+// colours green/orange/red around.
 const DEFAULT_THRESHOLD = 85
 
 export interface PeriodMetrics {
   attendancePercentage: number | null
   daysAny: number
   daysFull: number
-  // claude: percentage-point change vs. the prior TREND_WINDOW_DAYS window (e.g.
-  // claude: +3.2 means attendance improved 3.2 points); null if either window has
-  // claude: no expected minutes for the student (e.g. new enrolment, holidays).
+  // percentage-point change vs. the prior TREND_WINDOW_DAYS window (e.g.
+  // +3.2 means attendance improved 3.2 points); null if either window has
+  // no expected minutes for the student (e.g. new enrolment, holidays).
   trend: number | null
 }
 
-// claude: one row = one qualifying student, carrying both their year-to-date and
-// claude: current-term numbers (see buildReportData) — the email template renders
-// claude: these as two sub-rows under the student's name, per stakeholder request.
+// one row = one qualifying student, carrying both their year-to-date and
+// current-term numbers (see buildReportData) — the email template renders
+// these as two sub-rows under the student's name, per stakeholder request.
 export interface AbsenceRow {
   name: string
   studentCode: string | null
   yearLevel: string | null
   year: PeriodMetrics
   term: PeriodMetrics
-  // claude: period-line counts per STATUS_GROUPS (compass-api.helpers.ts), same
-  // claude: order, scoped to the *year* (not term) — a single running total shown
-  // claude: once per student rather than split per period row.
+  // period-line counts per STATUS_GROUPS (compass-api.helpers.ts), same
+  // order, scoped to the *year* (not term) — a single running total shown
+  // once per student rather than split per period row.
   statusGroupCounts: number[]
 }
 
-// claude: 'missing' = no period line recorded at all for that period that day
-// claude: (rendered "N/A"), distinct from a recorded code that just isn't flagged.
+// 'missing' = no period line recorded at all for that period that day
+// (rendered "N/A"), distinct from a recorded code that just isn't flagged.
 export type DailyCellKind = 'present' | 'flagged' | 'other' | 'missing'
 
 export interface DailyPeriodCell {
@@ -63,45 +63,45 @@ export interface DailyBreakdownRow {
   name: string
   studentCode: string | null
   cells: DailyPeriodCell[]
-  // claude: consecutive fully-absent school days ending on (and including) this
+  // consecutive fully-absent school days ending on (and including) this
   // table's date — only computed for the most recent day's table (see
   // getDailyPeriodBreakdown), 0 everywhere else so the template's ">threshold"
   // highlight check is a harmless no-op on older days.
   awayStreakDays: number
 }
 
-// claude: "more than three days in a row" per stakeholder request — a student's
+// "more than three days in a row" per stakeholder request — a student's
 // awayStreakDays must exceed this (i.e. be 4+) to be highlighted.
 export const AWAY_STREAK_HIGHLIGHT_THRESHOLD = 3
 
-// claude: how many school days back the streak walk is willing to look — generous
+// how many school days back the streak walk is willing to look — generous
 // upper bound (~8 school weeks) so a genuinely long absence isn't cut short, without
 // scanning the whole dataset for students who were only away for a day or two.
 const AWAY_STREAK_LOOKBACK_DAYS = 40
 
-// claude: null when the owning ReportDefinition didn't opt in (dailyPeriodBreakdown
-// claude: unset) or no complete day was found yet to report on.
+// null when the owning ReportDefinition didn't opt in (dailyPeriodBreakdown
+// unset) or no complete day was found yet to report on.
 export interface DailyBreakdownData {
   date: string
   rows: DailyBreakdownRow[]
 }
 
-// claude: single-section report data — one category (unexplained/explained), one
-// claude: ReportDefinition. Multiple reports over the same period are built by
-// claude: calling buildReportData once per definition, not by branching this shape.
+// single-section report data — one category (unexplained/explained), one
+// ReportDefinition. Multiple reports over the same period are built by
+// calling buildReportData once per definition, not by branching this shape.
 export interface AttendanceReportData {
   title: string
   periodName: string
   periodStart: string
   periodEnd: string
   totalStudents: number
-  // claude: row-inclusion cutoff this report was built with (def.threshold ??
-  // claude: DEFAULT_THRESHOLD) — carried through so the email template can state it
-  // claude: (e.g. "Below 85%") without hardcoding the default.
+  // row-inclusion cutoff this report was built with (def.threshold ??
+  // DEFAULT_THRESHOLD) — carried through so the email template can state it
+  // (e.g. "Below 85%") without hardcoding the default.
   threshold: number
   rows: AbsenceRow[]
-  // claude: one entry per complete day covered (see DAILY_BREAKDOWN_DAYS), most
-  // claude: recent first; empty when the report didn't opt in or no days qualified.
+  // one entry per complete day covered (see DAILY_BREAKDOWN_DAYS), most
+  // recent first; empty when the report didn't opt in or no days qualified.
   dailyBreakdown: DailyBreakdownData[]
 }
 
@@ -112,10 +112,10 @@ interface CategoryMetrics {
   trend: number | null
 }
 
-// claude: raw per-student numbers for a period, both categories, before any
-// claude: report-specific filtering/sorting/threshold is applied. Shared base that
-// claude: every ReportDefinition's buildReportData call is derived from, so adding
-// claude: a new report never means re-querying or re-deriving this.
+// raw per-student numbers for a period, both categories, before any
+// report-specific filtering/sorting/threshold is applied. Shared base that
+// every ReportDefinition's buildReportData call is derived from, so adding
+// a new report never means re-querying or re-deriving this.
 export interface StudentAttendance {
   compassPersonId: string
   name: string
@@ -194,10 +194,10 @@ function toStudentRosterEntry(row: StudentRow): StudentRosterEntry {
   }
 }
 
-// claude: reads the roster cached by sync.ts's upsertStudents instead of making a
-// claude: live personGetStudentsBasic call — every report-generation entry point
-// claude: below uses this rather than hitting Compass directly, so a send-report run
-// claude: only ever depends on Compass being up at sync time, not at send time.
+// reads the roster cached by sync.ts's upsertStudents instead of making a
+// live personGetStudentsBasic call — every report-generation entry point
+// below uses this rather than hitting Compass directly, so a send-report run
+// only ever depends on Compass being up at sync time, not at send time.
 async function queryStudentRoster(): Promise<StudentRosterEntry[]> {
   const rows: StudentRow[] = await sql`
     SELECT compass_person_id, first_name, last_name, student_code, year_level
@@ -224,8 +224,8 @@ function toPeriodAttendanceLine(row: PeriodLineRow): PeriodAttendanceLine {
   }
 }
 
-// claude: startIso inclusive, endExclusiveIso exclusive (so callers pass the day
-// claude: after the last day they want included).
+// startIso inclusive, endExclusiveIso exclusive (so callers pass the day
+// after the last day they want included).
 async function queryPeriodLines(
   startIso: string,
   endExclusiveIso: string,
@@ -241,30 +241,30 @@ async function queryPeriodLines(
   return rows.map(toPeriodAttendanceLine)
 }
 
-// claude: the 6 numbered teaching periods a school day is built from — excludes
-// claude: non-teaching blocks (AS/BS/L1/L2/R), which don't fit a fixed 6-column
-// claude: layout and aren't what "6 periods of the day" refers to.
+// the 6 numbered teaching periods a school day is built from — excludes
+// non-teaching blocks (AS/BS/L1/L2/R), which don't fit a fixed 6-column
+// layout and aren't what "6 periods of the day" refers to.
 const TEACHING_PERIOD_CODES = ['1', '2', '3', '4', '5', '6']
 
-// claude: a day only counts as "complete" once roughly the whole school has synced
-// claude: rolls for it — the most recent day in period_lines is often still being
-// claude: marked in Compass and syncs with a small fraction of students (e.g. 48 of
-// claude: ~686), which would make the breakdown table look broken for everyone else.
-// claude: 300 is comfortably below every normal day's headcount (600+) and well
-// claude: above a partially-synced one.
+// a day only counts as "complete" once roughly the whole school has synced
+// rolls for it — the most recent day in period_lines is often still being
+// marked in Compass and syncs with a small fraction of students (e.g. 48 of
+// ~686), which would make the breakdown table look broken for everyone else.
+// 300 is comfortably below every normal day's headcount (600+) and well
+// above a partially-synced one.
 const MIN_STUDENTS_FOR_COMPLETE_DAY = 300
 
-// claude: school timezone — `start` is stored as timestamptz (UTC instants), but
-// claude: Melbourne is UTC+10/+11, so morning periods (e.g. period 1 at 08:50 local)
-// claude: land on the *previous* UTC calendar date. Grouping/filtering by a raw
-// claude: `start::date` (as this used to) splits a single local school day across
-// claude: two UTC dates — Postgres's `AT TIME ZONE` handles the DST-aware
-// claude: conversion correctly, so all local-day logic goes through it rather than
-// claude: JS Date arithmetic.
+// school timezone — `start` is stored as timestamptz (UTC instants), but
+// Melbourne is UTC+10/+11, so morning periods (e.g. period 1 at 08:50 local)
+// land on the *previous* UTC calendar date. Grouping/filtering by a raw
+// `start::date` (as this used to) splits a single local school day across
+// two UTC dates — Postgres's `AT TIME ZONE` handles the DST-aware
+// conversion correctly, so all local-day logic goes through it rather than
+// JS Date arithmetic.
 const SCHOOL_TIMEZONE = 'Australia/Melbourne'
 
-// claude: most recent complete days first (descending) — the daily breakdown
-// claude: table renders them in this order, most recent day on top.
+// most recent complete days first (descending) — the daily breakdown
+// table renders them in this order, most recent day on top.
 async function findMostRecentCompleteDays(count: number): Promise<string[]> {
   const rows: { day: Date }[] = await sql`
     SELECT (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date AS day
@@ -278,9 +278,9 @@ async function findMostRecentCompleteDays(count: number): Promise<string[]> {
   return rows.map((row) => row.day.toISOString().substring(0, 10))
 }
 
-// claude: fetches every period line whose local (SCHOOL_TIMEZONE) calendar date
-// claude: matches dateIso — see the SCHOOL_TIMEZONE comment for why this can't just
-// claude: be a UTC start/end range like queryPeriodLines.
+// fetches every period line whose local (SCHOOL_TIMEZONE) calendar date
+// matches dateIso — see the SCHOOL_TIMEZONE comment for why this can't just
+// be a UTC start/end range like queryPeriodLines.
 async function queryPeriodLinesForLocalDay(
   dateIso: string,
 ): Promise<PeriodAttendanceLine[]> {
@@ -308,8 +308,8 @@ function classifyDailyCode(code: string | null): DailyCellKind {
   return 'other'
 }
 
-// claude: how many of the most recent complete school days the breakdown table
-// claude: covers — per stakeholder request, was 1 (just "yesterday").
+// how many of the most recent complete school days the breakdown table
+// covers — per stakeholder request, was 1 (just "yesterday").
 const DAILY_BREAKDOWN_DAYS = 3
 
 interface AwayStreakLineRow {
@@ -319,11 +319,11 @@ interface AwayStreakLineRow {
   prevalent_overall_status_id: string
 }
 
-// claude: walks backward, school day by school day, from `mostRecentDay`, counting
-// claude: how many consecutive days each candidate student was away every one of the
-// claude: 6 teaching periods that day (same "every period flagged" test the Full Days
-// claude: metric elsewhere uses) — stops at the first day that isn't a full absence,
-// claude: or at the edge of AWAY_STREAK_LOOKBACK_DAYS/available school days.
+// walks backward, school day by school day, from `mostRecentDay`, counting
+// how many consecutive days each candidate student was away every one of the
+// 6 teaching periods that day (same "every period flagged" test the Full Days
+// metric elsewhere uses) — stops at the first day that isn't a full absence,
+// or at the edge of AWAY_STREAK_LOOKBACK_DAYS/available school days.
 async function computeAwayStreaks(
   mostRecentDay: string,
   candidateIds: string[],
@@ -339,10 +339,10 @@ async function computeAwayStreaks(
     : REPORTABLE_STATUS_EXPORT_IDS
 
   const schoolDays = await findMostRecentCompleteDays(AWAY_STREAK_LOOKBACK_DAYS)
-  // claude: findMostRecentCompleteDays looks backward from "now", not from
-  // claude: mostRecentDay — in normal operation mostRecentDay is schoolDays[0], but
-  // claude: this guards against drift (e.g. a new day completing between the two
-  // claude: calls) by anchoring the walk to mostRecentDay's own position.
+  // findMostRecentCompleteDays looks backward from "now", not from
+  // mostRecentDay — in normal operation mostRecentDay is schoolDays[0], but
+  // this guards against drift (e.g. a new day completing between the two
+  // calls) by anchoring the walk to mostRecentDay's own position.
   const startIndex = schoolDays.indexOf(mostRecentDay)
   const walkDays = startIndex === -1 ? [] : schoolDays.slice(startIndex)
   if (walkDays.length === 0) {
@@ -421,10 +421,10 @@ async function buildDailyBreakdownForDay(
     linesByStudent.get(line.compassPersonId)!.push(line)
   }
 
-  // claude: unexplained reports pull a student in only for the unexplained code;
-  // claude: explained reports pull a student in for any reportable code, including
-  // claude: unexplained (500) — per stakeholder request, the daily breakdown table
-  // claude: should surface unexplained periods alongside explained ones.
+  // unexplained reports pull a student in only for the unexplained code;
+  // explained reports pull a student in for any reportable code, including
+  // unexplained (500) — per stakeholder request, the daily breakdown table
+  // should surface unexplained periods alongside explained ones.
   const inclusionIds = def.category === 'unexplained'
     ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
     : REPORTABLE_STATUS_EXPORT_IDS
@@ -491,14 +491,14 @@ async function buildDailyBreakdownForDay(
   return { date: day, rows }
 }
 
-// claude: builds the extra table(s) (opt-in via ReportDefinition.dailyPeriodBreakdown)
-// claude: showing, for each of the most recent DAILY_BREAKDOWN_DAYS complete school
-// claude: days, one row per student (in this report's category/yearLevels scope) who
-// claude: had at least one flagged period that day, with one column per teaching
-// claude: period. Separate from getStudentAttendance/buildReportData since it's
-// claude: day-scoped rather than term-scoped and needs its own period_lines queries.
-// claude: days with no qualifying students are dropped (mirrors the old single-day
-// claude: behaviour of hiding the table entirely when empty).
+// builds the extra table(s) (opt-in via ReportDefinition.dailyPeriodBreakdown)
+// showing, for each of the most recent DAILY_BREAKDOWN_DAYS complete school
+// days, one row per student (in this report's category/yearLevels scope) who
+// had at least one flagged period that day, with one column per teaching
+// period. Separate from getStudentAttendance/buildReportData since it's
+// day-scoped rather than term-scoped and needs its own period_lines queries.
+// days with no qualifying students are dropped (mirrors the old single-day
+// behaviour of hiding the table entirely when empty).
 export async function getDailyPeriodBreakdown(
   def: ReportDefinition,
 ): Promise<DailyBreakdownData[]> {
@@ -551,11 +551,11 @@ interface TrendPair {
   explainedTrend: number | null
 }
 
-// claude: compares the last TREND_WINDOW_DAYS days against the TREND_WINDOW_DAYS
-// claude: before that, per student, for both absence categories. Two separate
-// claude: queries (rather than one query split in JS) keeps the date-boundary
-// claude: logic in SQL instead of relying on string/Date comparisons matching
-// claude: exactly.
+// compares the last TREND_WINDOW_DAYS days against the TREND_WINDOW_DAYS
+// before that, per student, for both absence categories. Two separate
+// queries (rather than one query split in JS) keeps the date-boundary
+// logic in SQL instead of relying on string/Date comparisons matching
+// exactly.
 async function getTrends(
   statuses: AttendanceStatus[],
   students: StudentRosterEntry[],
@@ -619,13 +619,13 @@ function toStudentAttendance(
   }
 }
 
-// claude: the single DB-fetching entry point — every report, however it's sliced
-// claude: (category/year level/threshold), is derived from this same dataset via
-// claude: buildReportData rather than re-querying period_lines per report.
+// the single DB-fetching entry point — every report, however it's sliced
+// (category/year level/threshold), is derived from this same dataset via
+// buildReportData rather than re-querying period_lines per report.
 export async function getStudentAttendance(period: Period): Promise<AttendanceDataset> {
   const today = new Date().toISOString().substring(0, 10)
-  // claude: term may still be in progress — don't project attendance across days
-  // claude: that haven't happened yet, so cap the upper bound at today.
+  // term may still be in progress — don't project attendance across days
+  // that haven't happened yet, so cap the upper bound at today.
   const end = today < period.end ? today : period.end
 
   const [statusRows, students] = await Promise.all([
@@ -639,9 +639,9 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
   const percentages = calculateAttendancePercentages(assembled)
   const trends = await getTrends(statuses, students)
 
-  // claude: unmatched students (no roster join — see the ~97% match rate caveat on
-  // claude: personGetStudentsBasic) are dropped here rather than shown as blank rows,
-  // claude: since they aren't actionable for a coordinator without a name.
+  // unmatched students (no roster join — see the ~97% match rate caveat on
+  // personGetStudentsBasic) are dropped here rather than shown as blank rows,
+  // since they aren't actionable for a coordinator without a name.
   const matched = percentages.filter((p) => p.firstName !== null)
 
   return {
@@ -669,14 +669,14 @@ function toPeriodMetrics(
   }
 }
 
-// claude: shapes a year AttendanceDataset (plus the matching term dataset for the
-// claude: term row) into the single-section rows a specific ReportDefinition wants.
-// claude: inclusion is decided on the *year* percentage only — per stakeholder
-// claude: request, a student shows up (with both their year and term rows) as soon
-// claude: as their year-to-date attendance drops below the threshold, even if their
-// claude: current term alone would look fine. Year-level filter, category pick,
-// claude: threshold cutoff and sort all live here so reports/*.ts definitions stay
-// claude: pure data.
+// shapes a year AttendanceDataset (plus the matching term dataset for the
+// term row) into the single-section rows a specific ReportDefinition wants.
+// inclusion is decided on the *year* percentage only — per stakeholder
+// request, a student shows up (with both their year and term rows) as soon
+// as their year-to-date attendance drops below the threshold, even if their
+// current term alone would look fine. Year-level filter, category pick,
+// threshold cutoff and sort all live here so reports/*.ts definitions stay
+// pure data.
 export function buildReportData(
   yearDataset: AttendanceDataset,
   termDataset: AttendanceDataset,
@@ -720,10 +720,10 @@ export function buildReportData(
   }
 }
 
-// claude: buildReportData plus the opt-in daily breakdown table — the version
-// claude: send-report.ts/email-preview.ts should use, since those render the full
-// claude: email. report.ts (CSV/console output) has no use for the daily table, so
-// claude: it calls buildReportData directly and stays synchronous.
+// buildReportData plus the opt-in daily breakdown table — the version
+// send-report.ts/email-preview.ts should use, since those render the full
+// email. report.ts (CSV/console output) has no use for the daily table, so
+// it calls buildReportData directly and stays synchronous.
 export async function buildFullReportData(
   yearDataset: AttendanceDataset,
   termDataset: AttendanceDataset,
@@ -734,11 +734,11 @@ export async function buildFullReportData(
   return { ...data, dailyBreakdown }
 }
 
-// claude: shared by send-report.ts (manual/CLI sends) and cron.ts (scheduled sends)
-// claude: so the subject format can't drift between the two paths. Anchored to the
-// claude: most recent day in the daily breakdown (not "today") — see
-// claude: findMostRecentCompleteDays — falls back to just the report label when
-// claude: there's no daily breakdown (e.g. whole-school reports, which don't opt in).
+// shared by send-report.ts (manual/CLI sends) and cron.ts (scheduled sends)
+// so the subject format can't drift between the two paths. Anchored to the
+// most recent day in the daily breakdown (not "today") — see
+// findMostRecentCompleteDays — falls back to just the report label when
+// there's no daily breakdown (e.g. whole-school reports, which don't opt in).
 export function buildSubjectLine(
   def: ReportDefinition,
   data: AttendanceReportData,

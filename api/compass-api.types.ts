@@ -2,9 +2,9 @@
 
 // Based on the GetPeriodLines request, but the response will have more fields.
 // You'll need to fill this out based on the actual API response.
-// claude: unverified for attendanceGetPeriodLines / attendanceGetLines / makeRequest —
-// claude: still in use by those functions. See PeriodAttendanceLine below for the shape
-// claude: confirmed against the real GetPeriodLinesTracking response.
+// unverified for attendanceGetPeriodLines / attendanceGetLines / makeRequest —
+// still in use by those functions. See PeriodAttendanceLine below for the shape
+// confirmed against the real GetPeriodLinesTracking response.
 export interface AttendancePeriodLine {
   arrivalTimestamp: string
   campusGuid: string
@@ -53,8 +53,8 @@ export interface AttendancePeriodLineDateObject {
 // and the value is an array of attendance lines for that day.
 export type GroupedAttendance = Map<string, AttendancePeriodLineDateObject[]>
 
-// claude: based on the actual response from attendanceGetPeriodLinesBetweenBounds
-// claude: (V4/Attendance/GetPeriodLinesTracking), see models/attendanceGetPeriodLinesBetweenBounds.json
+// based on the actual response from attendanceGetPeriodLinesBetweenBounds
+// (V4/Attendance/GetPeriodLinesTracking), see models/attendanceGetPeriodLinesBetweenBounds.json
 export interface PeriodAttendanceLine {
   __type: string
   campusGuid: string | null
@@ -72,7 +72,7 @@ export interface PeriodAttendanceLine {
 }
 
 // Based on the GetStatuses response
-// claude: old guessed version — kept as reference, commented out, superseded below
+// old guessed version — kept as reference, commented out, superseded below
 // export interface AttendanceStatus {
 //   id: number
 //   name: string
@@ -80,8 +80,8 @@ export interface PeriodAttendanceLine {
 //   isSystemStatus: boolean
 // }
 
-// claude: based on the actual response from attendanceGetStatuses (api/attendance/v3/GetStatuses),
-// claude: see models/attendanceGetStatuses.json
+// based on the actual response from attendanceGetStatuses (api/attendance/v3/GetStatuses),
+// see models/attendanceGetStatuses.json
 export interface AttendanceStatus {
   __type: string
   countedAbsence: boolean
@@ -112,7 +112,7 @@ export interface FormGroup {
 }
 
 // Based on the GetStudents response
-// claude: old guessed version — kept as reference, commented out, superseded below
+// old guessed version — kept as reference, commented out, superseded below
 // export interface Student {
 //   id: number
 //   userId: number
@@ -121,12 +121,12 @@ export interface FormGroup {
 //   schoolYear: number
 // }
 
-// claude: based on the actual response from personGetStudents (API/V6/Person/GetStudents),
-// claude: see models/personGetStudents.json. The real __type is "Person" (a full contact
-// claude: record, not just a student). Fields that came back as unexpanded "[Object]" in
-// claude: the console output (addresses, emergencyContacts, identifications,
-// claude: importIdentifiers, languages, organisationMilestones, studentDetails — which is
-// claude: where schoolYear likely lives) are omitted since their shape isn't visible yet.
+// based on the actual response from personGetStudents (API/V6/Person/GetStudents),
+// see models/personGetStudents.json. The real __type is "Person" (a full contact
+// record, not just a student). Fields that came back as unexpanded "[Object]" in
+// the console output (addresses, emergencyContacts, identifications,
+// importIdentifiers, languages, organisationMilestones, studentDetails — which is
+// where schoolYear likely lives) are omitted since their shape isn't visible yet.
 export interface Student {
   __type: string
   accessRestrictions: unknown[]
@@ -229,11 +229,11 @@ export interface Student {
   youthAllowance: boolean
 }
 
-// claude: based on the actual response from getStudentsBasic
-// claude: (api/person/v1/GetStudentsBasic) — a much lighter student record than the
-// claude: full Person object above, and confirmed to have a better match rate
-// claude: against attendance period lines. Preferred source for
-// claude: assembleAttendanceReport's student join.
+// based on the actual response from getStudentsBasic
+// (api/person/v1/GetStudentsBasic) — a much lighter student record than the
+// full Person object above, and confirmed to have a better match rate
+// against attendance period lines. Preferred source for
+// assembleAttendanceReport's student join.
 export interface StudentBasic {
   __type: string
   boarderType: string | null
@@ -275,10 +275,10 @@ export interface StudentBasic {
   yearLevel: string
 }
 
-// claude: the subset of StudentBasic actually consumed by reporting (see
-// claude: assembleAttendanceReport) — matches the columns cached in Postgres'
-// claude: `students` table (see sync.ts), which mirrors a live personGetStudentsBasic
-// claude: call structurally so either can be passed where this is expected.
+// the subset of StudentBasic actually consumed by reporting (see
+// assembleAttendanceReport) — matches the columns cached in Postgres'
+// `students` table (see sync.ts), which mirrors a live personGetStudentsBasic
+// call structurally so either can be passed where this is expected.
 export interface StudentRosterEntry {
   compassPersonId: string
   firstName: string
@@ -287,10 +287,10 @@ export interface StudentRosterEntry {
   yearLevel: string | null
 }
 
-// claude: flat, CSV-ready row combining a PeriodAttendanceLine with its matching
-// claude: StudentBasic (joined on compassPersonId) and AttendanceStatus (joined on
-// claude: prevalentOverallStatusId -> statusId). See assembleAttendanceReport
-// claude: in compass-api.helpers.ts.
+// flat, CSV-ready row combining a PeriodAttendanceLine with its matching
+// StudentBasic (joined on compassPersonId) and AttendanceStatus (joined on
+// prevalentOverallStatusId -> statusId). See assembleAttendanceReport
+// in compass-api.helpers.ts.
 export interface AssembledAttendancePeriodLine
   extends Omit<PeriodAttendanceLine, '__type'> {
   firstName: string | null
@@ -308,23 +308,23 @@ export interface AssembledAttendancePeriodLine
   countedAbsence: boolean | null
 }
 
-// claude: one row per student, aggregated from AssembledAttendancePeriodLine by
-// claude: calculateAttendancePercentages in compass-api.helpers.ts. Only
-// claude: teachingTime periods count toward expectedMinutes — see the conversation
-// claude: on periodCode for why (non-teaching blocks like recess/lunch aren't real
-// claude: instructional time and aren't tracked uniformly across students anyway).
-// claude: unexplainedAbsenceMinutes only counts the "Unexplained"
-// claude: (schoolSystemExportIdentifier "500") status; explainedAbsenceMinutes
-// claude: counts only the curated REPORTABLE_STATUS_EXPORT_IDS reasons (excluding
-// claude: 500) — the two are mutually exclusive and reported separately rather than
-// claude: combined, since only unexplained absence is actionable.
-// claude: the *Days fields count calendar dates rather than minutes: *DaysAny counts
-// claude: a date if the student had at least one qualifying period that day,
-// claude: *DaysFull only if every teaching period that day qualified.
-// claude: statusGroupCounts is a period-line count (not collapsed to days) per
-// claude: stakeholder-defined status group — see STATUS_GROUPS in
-// claude: compass-api.helpers.ts for the schoolSystemExportIdentifier groupings and
-// claude: display order.
+// one row per student, aggregated from AssembledAttendancePeriodLine by
+// calculateAttendancePercentages in compass-api.helpers.ts. Only
+// teachingTime periods count toward expectedMinutes — see the conversation
+// on periodCode for why (non-teaching blocks like recess/lunch aren't real
+// instructional time and aren't tracked uniformly across students anyway).
+// unexplainedAbsenceMinutes only counts the "Unexplained"
+// (schoolSystemExportIdentifier "500") status; explainedAbsenceMinutes
+// counts only the curated REPORTABLE_STATUS_EXPORT_IDS reasons (excluding
+// 500) — the two are mutually exclusive and reported separately rather than
+// combined, since only unexplained absence is actionable.
+// the *Days fields count calendar dates rather than minutes: *DaysAny counts
+// a date if the student had at least one qualifying period that day,
+// *DaysFull only if every teaching period that day qualified.
+// statusGroupCounts is a period-line count (not collapsed to days) per
+// stakeholder-defined status group — see STATUS_GROUPS in
+// compass-api.helpers.ts for the schoolSystemExportIdentifier groupings and
+// display order.
 export interface StudentAttendancePercentage {
   compassPersonId: string
   firstName: string | null

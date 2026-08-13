@@ -8,8 +8,8 @@ import explainedAbsencesYear10 from './explained-absences-year-10.ts'
 import explainedAbsencesYear11 from './explained-absences-year-11.ts'
 import explainedAbsencesYear12 from './explained-absences-year-12.ts'
 
-// claude: every report must be registered here to be reachable by id from the CLI
-// claude: scripts (send-report.ts, email-preview.ts, report.ts).
+// every report must be registered here to be reachable by id from the CLI
+// scripts (send-report.ts, email-preview.ts, report.ts).
 const reports: ReportDefinition[] = [
   unexplainedAbsences,
   explainedAbsences,

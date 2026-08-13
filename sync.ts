@@ -16,30 +16,30 @@ import { endRun, log, logError, startRun } from './logger.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
 
-// claude: offset-paginated (skip/take) against a "total" re-read from Compass on
-// claude: every page — if sync runs mid-school-day while rows for today are still
-// claude: being written (teachers marking later periods), that total can drift
-// claude: between pages and silently skip rows. A skipped row's updated_timestamp is
-// claude: still older than the watermark we then record, so a normal incremental
-// claude: sync never retries it — confirmed in practice (CAP0007's periods 3/4 for
-// claude: 30 July were missing from period_lines despite Compass showing them
-// claude: marked). This is a self-heal, not a root-cause fix: it can't stop a page
-// claude: from being dropped, only guarantee a dropped row gets a fresh chance on
-// claude: every run until it's within this window.
+// offset-paginated (skip/take) against a "total" re-read from Compass on
+// every page — if sync runs mid-school-day while rows for today are still
+// being written (teachers marking later periods), that total can drift
+// between pages and silently skip rows. A skipped row's updated_timestamp is
+// still older than the watermark we then record, so a normal incremental
+// sync never retries it — confirmed in practice (CAP0007's periods 3/4 for
+// 30 July were missing from period_lines despite Compass showing them
+// marked). This is a self-heal, not a root-cause fix: it can't stop a page
+// from being dropped, only guarantee a dropped row gets a fresh chance on
+// every run until it's within this window.
 const TRAILING_RESYNC_DAYS = 14
 
 const SCHOOL_TIMEZONE = 'Australia/Melbourne'
 
-// claude: the API's uBound is sent as `${end}T00:00:00Z` — an *instant*, not a local
-// claude: calendar date (see attendanceGetPeriodLinesBetweenBounds) — so an `end` of
-// claude: "2026-08-10" actually closes the window at 10am/11am Melbourne on the 10th,
-// claude: not at local midnight. This used to be handed new Date().toISOString()'s UTC
-// claude: date, which made it worse: the 07:30 Melbourne job runs at 21:30 UTC the
-// claude: *previous* day, so `end` resolved to the previous UTC date and the window
-// claude: shut at 10am on the very day being reported — periods 3-6 were never fetched
-// claude: and rendered as "Unscheduled" in the daily breakdown. Taking today's
-// claude: Melbourne date and adding a day puts the boundary at 10am tomorrow local,
-// claude: safely past the end of today's last period, whatever the DST offset is.
+// the API's uBound is sent as `${end}T00:00:00Z` — an *instant*, not a local
+// calendar date (see attendanceGetPeriodLinesBetweenBounds) — so an `end` of
+// "2026-08-10" actually closes the window at 10am/11am Melbourne on the 10th,
+// not at local midnight. This used to be handed new Date().toISOString()'s UTC
+// date, which made it worse: the 07:30 Melbourne job runs at 21:30 UTC the
+// *previous* day, so `end` resolved to the previous UTC date and the window
+// shut at 10am on the very day being reported — periods 3-6 were never fetched
+// and rendered as "Unscheduled" in the daily breakdown. Taking today's
+// Melbourne date and adding a day puts the boundary at 10am tomorrow local,
+// safely past the end of today's last period, whatever the DST offset is.
 function syncWindowEnd(): string {
   const melbourneToday = new Date().toLocaleDateString('en-CA', {
     timeZone: SCHOOL_TIMEZONE,
@@ -49,12 +49,12 @@ function syncWindowEnd(): string {
   return end.toISOString().substring(0, 10)
 }
 
-// claude: sync_state is only ever written after a run fully completes (see bottom of
-// claude: this file), so reading it back is always safe — unlike computing
-// claude: MAX(updated_timestamp) live from period_lines, which would be poisoned by a
-// claude: crashed/partial run (Compass's pagination order isn't guaranteed sorted by
-// claude: updatedTimestamp, so a partial max() could exceed the timestamp of an
-// claude: unfetched row and silently skip it on "resume").
+// sync_state is only ever written after a run fully completes (see bottom of
+// this file), so reading it back is always safe — unlike computing
+// MAX(updated_timestamp) live from period_lines, which would be poisoned by a
+// crashed/partial run (Compass's pagination order isn't guaranteed sorted by
+// updatedTimestamp, so a partial max() could exceed the timestamp of an
+// unfetched row and silently skip it on "resume").
 async function getSyncState(): Promise<{ lastSyncedTimestamp: string } | null> {
   const [row] = await sql<[{ last_synced_timestamp: string }?]>`
     SELECT last_synced_timestamp FROM sync_state WHERE id = true
@@ -89,12 +89,12 @@ function toRow(line: PeriodAttendanceLine) {
   }
 }
 
-// claude: periodLineId is Compass's stable identifier for a line, so it's the
-// claude: natural upsert key — a row can come back again with an updated status/time
-// claude: after an edit, and we want the latest version rather than a duplicate.
-// claude: called once per page (see attendanceGetPeriodLinesBetweenBounds's onPage)
-// claude: rather than once at the end, so a mid-sync failure still leaves everything
-// claude: fetched so far durably written instead of lost in memory.
+// periodLineId is Compass's stable identifier for a line, so it's the
+// natural upsert key — a row can come back again with an updated status/time
+// after an edit, and we want the latest version rather than a duplicate.
+// called once per page (see attendanceGetPeriodLinesBetweenBounds's onPage)
+// rather than once at the end, so a mid-sync failure still leaves everything
+// fetched so far durably written instead of lost in memory.
 async function upsertPeriodLines(lines: PeriodAttendanceLine[]) {
   if (lines.length === 0) {
     return
@@ -134,9 +134,9 @@ async function upsertPeriodLines(lines: PeriodAttendanceLine[]) {
   `
 }
 
-// claude: statuses is a small, non-paginated reference list (not per-row data like
-// claude: period_lines), so it's just refreshed in full on every sync run rather than
-// claude: tracked incrementally.
+// statuses is a small, non-paginated reference list (not per-row data like
+// period_lines), so it's just refreshed in full on every sync run rather than
+// tracked incrementally.
 async function upsertStatuses(statuses: AttendanceStatus[]) {
   const rows = statuses.map((status) => ({
     status_id: status.statusId,
@@ -177,11 +177,11 @@ async function upsertStatuses(statuses: AttendanceStatus[]) {
   `
 }
 
-// claude: student roster is a small, non-paginated list (not per-row data like
-// claude: period_lines), so — same as statuses — it's just refreshed in full on every
-// claude: sync run rather than tracked incrementally. Cached so report generation
-// claude: (send-report.ts et al.) reads names/codes/year levels from Postgres instead
-// claude: of making its own live Compass calls on every send.
+// student roster is a small, non-paginated list (not per-row data like
+// period_lines), so — same as statuses — it's just refreshed in full on every
+// sync run rather than tracked incrementally. Cached so report generation
+// (send-report.ts et al.) reads names/codes/year levels from Postgres instead
+// of making its own live Compass calls on every send.
 async function upsertStudents(students: StudentBasic[]) {
   const rows = students.map((student) => ({
     compass_person_id: student.compassPersonId,
@@ -222,11 +222,11 @@ interface SyncSummary {
   watermark: string | null
 }
 
-// claude: updated at the start of each phase in runSync — read by the failure email
-// claude: (see renderSyncFailureEmail) so a scheduled run that dies mid-sync says
-// claude: plainly which phase it was in ("fetching students from Compass") rather
-// claude: than making the reader infer that from a stack trace pointing at internal
-// claude: function names.
+// updated at the start of each phase in runSync — read by the failure email
+// (see renderSyncFailureEmail) so a scheduled run that dies mid-sync says
+// plainly which phase it was in ("fetching students from Compass") rather
+// than making the reader infer that from a stack trace pointing at internal
+// function names.
 let currentStage = 'starting up'
 
 async function runSync(): Promise<SyncSummary> {
@@ -252,12 +252,12 @@ async function runSync(): Promise<SyncSummary> {
   if (syncState) {
     modifiedSinceTimestamp = syncState.lastSyncedTimestamp
   } else {
-    // claude: no completed sync on record yet — still working through the initial
-    // claude: historical backfill. Resume pagination from where period_lines currently
-    // claude: sits rather than re-fetching from skip=0: safe because we keep using the
-    // claude: same fixed FIRST_SYNC_TIMESTAMP bound (not a computed watermark) and
-    // claude: upserts are idempotent on period_line_id, so continuing the same
-    // claude: deterministic request sequence can't skip or duplicate rows.
+    // no completed sync on record yet — still working through the initial
+    // historical backfill. Resume pagination from where period_lines currently
+    // sits rather than re-fetching from skip=0: safe because we keep using the
+    // same fixed FIRST_SYNC_TIMESTAMP bound (not a computed watermark) and
+    // upserts are idempotent on period_line_id, so continuing the same
+    // deterministic request sequence can't skip or duplicate rows.
     modifiedSinceTimestamp = FIRST_SYNC_TIMESTAMP
     const [{ count }] = await sql<
       [{ count: string }]
@@ -289,13 +289,13 @@ async function runSync(): Promise<SyncSummary> {
 
   log(`sync.ts: done, upserted ${syncedCount} period lines total`)
 
-  // claude: unconditional — ignores modifiedSinceTimestamp entirely (passes
-  // claude: FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
-  // claude: regardless of when it was last modified, not just ones Compass reports as
-  // claude: recently changed. See the TRAILING_RESYNC_DAYS comment for why the
-  // claude: watermark-based sync above can't be trusted to have caught everything on
-  // claude: its own. Idempotent (upsert on period_line_id), so re-fetching rows we
-  // claude: already have is just wasted bandwidth, not a correctness risk.
+  // unconditional — ignores modifiedSinceTimestamp entirely (passes
+  // FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
+  // regardless of when it was last modified, not just ones Compass reports as
+  // recently changed. See the TRAILING_RESYNC_DAYS comment for why the
+  // watermark-based sync above can't be trusted to have caught everything on
+  // its own. Idempotent (upsert on period_line_id), so re-fetching rows we
+  // already have is just wasted bandwidth, not a correctness risk.
   const trailingStart = new Date()
   trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
   const trailingStartIso = trailingStart.toISOString().substring(0, 10)
@@ -401,12 +401,12 @@ function renderSyncFailureEmail(
   return { subject: `[Compass Sync] FAILED — ${currentStage}`, html }
 }
 
-// claude: runs the sync and always emails the outcome — reused by both this file's
-// claude: own CLI entry point (deno task sync) and cron.ts's scheduled daily job, so
-// claude: there's one place that decides "sync happened, here's what to tell Mark."
-// claude: Deliberately does NOT call sql.end() or Deno.exit — cron.ts keeps the same
-// claude: process (and DB pool) alive for months between runs, so only a genuine
-// claude: one-shot CLI invocation (see the import.meta.main block below) may do that.
+// runs the sync and always emails the outcome — reused by both this file's
+// own CLI entry point (deno task sync) and cron.ts's scheduled daily job, so
+// there's one place that decides "sync happened, here's what to tell Mark."
+// Deliberately does NOT call sql.end() or Deno.exit — cron.ts keeps the same
+// process (and DB pool) alive for months between runs, so only a genuine
+// one-shot CLI invocation (see the import.meta.main block below) may do that.
 export async function runSyncAndEmail(): Promise<{ ok: boolean }> {
   const logPath = startRun('sync')
   log(`sync.ts: run starting, logging to ${logPath}`)

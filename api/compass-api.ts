@@ -9,10 +9,10 @@ import {
 } from './compass-api.types.ts'
 import { log } from '../logger.ts'
 
-// claude: every Compass endpoint wraps its payload in a top-level "d". These three
-// claude: envelope shapes were confirmed against the live API (see compass-query.ts
-// claude: for ad-hoc spot-checks). Kept local to this file since they're a
-// claude: fetch-layer concern, not a domain type.
+// every Compass endpoint wraps its payload in a top-level "d". These three
+// envelope shapes were confirmed against the live API (see compass-query.ts
+// for ad-hoc spot-checks). Kept local to this file since they're a
+// fetch-layer concern, not a domain type.
 interface CompassApiResponseEnvelope<T> {
   d: {
     __type: string
@@ -41,9 +41,9 @@ export function getSchoolUrl() {
   return 'cheltsec-vic.compass.education'
 }
 
-// claude: plain fetch() hangs indefinitely on a dropped connection with no error and
-// claude: no way to recover — seen in practice mid-sync. Timeout + a few retries turns
-// claude: that into a bounded failure instead.
+// plain fetch() hangs indefinitely on a dropped connection with no error and
+// no way to recover — seen in practice mid-sync. Timeout + a few retries turns
+// that into a bounded failure instead.
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
@@ -68,10 +68,10 @@ async function fetchWithRetry(
   }
 }
 
-// claude: a bad/expired API key, Compass maintenance, or a rate limit used to fail
-// claude: deep inside JSON.parse or a ".map on undefined" a step later — useless in a
-// claude: failure-alert email (see sync.ts's summary email). This surfaces the actual
-// claude: HTTP status/body from the endpoint that failed instead.
+// a bad/expired API key, Compass maintenance, or a rate limit used to fail
+// deep inside JSON.parse or a ".map on undefined" a step later — useless in a
+// failure-alert email (see sync.ts's summary email). This surfaces the actual
+// HTTP status/body from the endpoint that failed instead.
 async function textOrThrow(response: Response, endpoint: string): Promise<string> {
   const data = await response.text()
   if (!response.ok) {
@@ -166,20 +166,20 @@ export async function attendanceGetPeriodLinesBetweenBounds(
 > {
   const endpoint = '/API/V4/Attendance/GetPeriodLinesTracking'
   const take = 1000
-  // claude: only accumulated when there's no onPage callback — sync.ts's production
-  // claude: callers pass onPage and persist each page straight to Postgres, never
-  // claude: touching the return value, so holding the entire result (a full first-sync
-  // claude: backfill can be 500k+ rows) in memory on top of that would be pure waste.
-  // claude: compass-query.ts's ad-hoc CLI is the only caller that wants the array back,
-  // claude: and it never passes onPage.
+  // only accumulated when there's no onPage callback — sync.ts's production
+  // callers pass onPage and persist each page straight to Postgres, never
+  // touching the return value, so holding the entire result (a full first-sync
+  // backfill can be 500k+ rows) in memory on top of that would be pure waste.
+  // compass-query.ts's ad-hoc CLI is the only caller that wants the array back,
+  // and it never passes onPage.
   const lines: PeriodAttendanceLine[] = []
   let skip = startSkip
   let total = Infinity
 
-  // claude: skip/take pagination, not cursor-based — the envelope reports "total"
-  // claude: so we page until skip catches up to it. Seen as 171612 for a 2-month
-  // claude: window in testing, so a full year could mean ~1000 sequential requests;
-  // claude: worth checking response time in practice before scheduling this unattended.
+  // skip/take pagination, not cursor-based — the envelope reports "total"
+  // so we page until skip catches up to it. Seen as 171612 for a 2-month
+  // window in testing, so a full year could mean ~1000 sequential requests;
+  // worth checking response time in practice before scheduling this unattended.
   while (skip < total) {
     const response = await fetchWithRetry(
       `https://${getSchoolUrl()}${endpoint}`,
@@ -313,9 +313,9 @@ export async function referenceGetFormGroup(): Promise<Array<FormGroup>> {
   return JSON.parse(data)
 }
 
-// claude: lighter, better-matching alternative to personGetStudents — confirmed
-// claude: 404/415 (97%) match rate against a 1000-row period-lines sample, vs 940/1000
-// claude: (94%) via personGetStudents. Preferred source for assembleAttendanceReport.
+// lighter, better-matching alternative to personGetStudents — confirmed
+// 404/415 (97%) match rate against a 1000-row period-lines sample, vs 940/1000
+// (94%) via personGetStudents. Preferred source for assembleAttendanceReport.
 export async function personGetStudentsBasic(): Promise<Array<StudentBasic>> {
   const endpoint = '/api/person/v1/GetStudentsBasic'
 
