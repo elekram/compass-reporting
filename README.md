@@ -56,7 +56,13 @@ reachable at _sync_ time, not at _send_ time.
    DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
    MAIL_NO_REPLY_PASSWORD=<smtp app password>
    SYNC_SUMMARY_RECIPIENTS=you@example.com
+   CRON_DEBUG_MODE=false
+   CRON_DEBUG_RECIPIENTS=you@example.com
    ```
+
+   `CRON_DEBUG_MODE` must be exactly `true` or `false` — `cron.ts` throws on startup for
+   anything else (including unset) rather than defaulting, so a misconfigured copy can't
+   silently fall through to emailing real coordinators. Set it to `true` on any dev clone.
 
 2. `docker compose up -d` — brings up Postgres (schema created from
    `init/postgres-init.sh` on first boot only) and the `web` container running `cron.ts`.
@@ -114,11 +120,12 @@ job that runs the sync and then sends every enabled report, controlled by
 
 - `runTimeLocal` — Melbourne local time (`"HH:MM"`, must land on a 5-minute mark) the job
   fires.
-- `debugMode` / `debugRecipients` — while `debugMode` is `true`, every report email is
-  redirected to `debugRecipients` instead of its real recipients. Useful for testing the
-  whole pipeline without coordinators receiving anything. The sync summary/failure email
-  is unaffected by this flag — it always goes to `mail-config.ts`'s
-  `syncSummaryRecipients`.
+- `debugMode` / `debugRecipients` — read from `deno.env`'s `CRON_DEBUG_MODE` and
+  `CRON_DEBUG_RECIPIENTS`, not committed to this file, since they differ per deployment.
+  While `debugMode` is `true`, every report email is redirected to `debugRecipients`
+  instead of its real recipients. Useful for testing the whole pipeline without
+  coordinators receiving anything. The sync summary/failure email is unaffected by this
+  flag — it always goes to `mail-config.ts`'s `syncSummaryRecipients`.
 - `reports` — one entry per report id, with an `enabled` switch and its real `recipients`
   list.
 
