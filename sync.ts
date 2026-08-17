@@ -1,6 +1,7 @@
 import sql from './db.ts'
 import {
   attendanceGetPeriodLinesBetweenBounds,
+  attendanceGetPeriodLinesTotal,
   attendanceGetStatuses,
   personGetStudentsBasic,
 } from './api/compass-api.ts'
@@ -11,7 +12,7 @@ import {
 } from './api/compass-api.types.ts'
 import config from './config/config.ts'
 import mailConfig from './config/mail-config.ts'
-import { sendMail } from './mailer.ts'
+import { sendMail as sendMailRaw } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
 const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
@@ -211,6 +212,33 @@ async function upsertStudents(students: StudentBasic[]) {
   `
 }
 
+interface DiscrepancyCheck {
+  dbCount: number
+  apiTotal: number
+  gap: number
+}
+
+// compares Compass's own row count for the full year-to-date window against
+// what's actually in period_lines for that window — a cheap (take=1) way to
+// detect the skip/take pagination drift described above (see
+// TRAILING_RESYNC_DAYS), independent of whether the drift happened recently
+// enough for the trailing resync to have already caught it.
+async function checkPeriodLineDiscrepancy(): Promise<DiscrepancyCheck> {
+  const windowEnd = syncWindowEnd()
+  const apiTotal = await attendanceGetPeriodLinesTotal(
+    config.year.start,
+    windowEnd,
+    FIRST_SYNC_TIMESTAMP,
+  )
+  const [{ count }] = await sql<[{ count: string }]>`
+    SELECT count(*)::text FROM period_lines
+    WHERE start >= ${`${config.year.start}T00:00:00Z`}
+      AND start < ${`${windowEnd}T00:00:00Z`}
+  `
+  const dbCount = Number(count)
+  return { dbCount, apiTotal, gap: apiTotal - dbCount }
+}
+
 interface SyncSummary {
   startedAt: string
   finishedAt: string
@@ -228,6 +256,44 @@ interface SyncSummary {
 // than making the reader infer that from a stack trace pointing at internal
 // function names.
 let currentStage = 'starting up'
+
+// unconditional — ignores modifiedSinceTimestamp entirely (passes
+// FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched regardless
+// of when it was last modified, not just ones Compass reports as recently
+// changed. See the TRAILING_RESYNC_DAYS comment for why a watermark-based
+// sync can't be trusted to have caught everything on its own. Idempotent
+// (upsert on period_line_id), so re-fetching rows already held is just
+// wasted bandwidth, not a correctness risk. Shared by runSync (every normal
+// sync) and runEveningCheckAndEmail (as a cheap self-heal pass before
+// deciding whether the far more expensive full-term resync is warranted).
+async function runTrailingResync(windowEnd: string): Promise<number> {
+  const trailingStart = new Date()
+  trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
+  const trailingStartIso = trailingStart.toISOString().substring(0, 10)
+
+  log(
+    `sync.ts: running trailing resync for ${trailingStartIso} to ${windowEnd} (self-heals rows a sync may have silently dropped)`,
+  )
+
+  let trailingSyncedCount = 0
+  await attendanceGetPeriodLinesBetweenBounds(
+    trailingStartIso,
+    windowEnd,
+    FIRST_SYNC_TIMESTAMP,
+    async (page) => {
+      await upsertPeriodLines(page)
+      trailingSyncedCount += page.length
+      log(
+        `sync.ts: trailing resync upserted ${trailingSyncedCount} period lines so far`,
+      )
+    },
+  )
+
+  log(
+    `sync.ts: trailing resync done, upserted ${trailingSyncedCount} period lines total`,
+  )
+  return trailingSyncedCount
+}
 
 async function runSync(): Promise<SyncSummary> {
   const startedAt = new Date().toISOString()
@@ -289,40 +355,8 @@ async function runSync(): Promise<SyncSummary> {
 
   log(`sync.ts: done, upserted ${syncedCount} period lines total`)
 
-  // unconditional — ignores modifiedSinceTimestamp entirely (passes
-  // FIRST_SYNC_TIMESTAMP) so every line in the window is re-fetched
-  // regardless of when it was last modified, not just ones Compass reports as
-  // recently changed. See the TRAILING_RESYNC_DAYS comment for why the
-  // watermark-based sync above can't be trusted to have caught everything on
-  // its own. Idempotent (upsert on period_line_id), so re-fetching rows we
-  // already have is just wasted bandwidth, not a correctness risk.
-  const trailingStart = new Date()
-  trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
-  const trailingStartIso = trailingStart.toISOString().substring(0, 10)
-
-  log(
-    `sync.ts: running trailing resync for ${trailingStartIso} to ${windowEnd} (self-heals rows the sync above may have silently dropped)`,
-  )
-
   currentStage = 'running trailing resync from Compass'
-  let trailingSyncedCount = 0
-
-  await attendanceGetPeriodLinesBetweenBounds(
-    trailingStartIso,
-    windowEnd,
-    FIRST_SYNC_TIMESTAMP,
-    async (page) => {
-      await upsertPeriodLines(page)
-      trailingSyncedCount += page.length
-      log(
-        `sync.ts: trailing resync upserted ${trailingSyncedCount} period lines so far`,
-      )
-    },
-  )
-
-  log(
-    `sync.ts: trailing resync done, upserted ${trailingSyncedCount} period lines total`,
-  )
+  const trailingSyncedCount = await runTrailingResync(windowEnd)
 
   currentStage = 'recording sync watermark'
   const [{ max }] = await sql<[{ max: string | null }]>`
@@ -398,7 +432,30 @@ function renderSyncFailureEmail(
     </div>
   `
 
-  return { subject: `[Compass Sync] FAILED — ${currentStage}`, html }
+  // plain ASCII only — denomailer's RFC 2047 encoded-word folding for
+  // non-ASCII Subject headers (an em dash, say) breaks mid-character on long
+  // subjects, and the malformed header makes some clients (Gmail included)
+  // give up parsing the whole message and show raw MIME source instead of
+  // the rendered email. See mailer.ts's toBase64Mime comment for the same
+  // denomailer-workaround pattern applied to the body.
+  return { subject: `[Compass Sync] FAILED - ${currentStage}`, html }
+}
+
+// sendMail failures (SMTP rejection, a DNS blip, etc.) must never crash the
+// whole run uncaught — confirmed the hard way: an evening resync that had
+// already durably upserted 54,000 rows to Postgres was lost to an uncaught
+// rejection when notifying about an unrelated Compass API timeout also hit a
+// transient DNS failure. The sync/resync work is committed independently of
+// this email, so losing the notification is far preferable to losing the
+// process (and, for cron.ts, its scheduling) to it.
+async function sendMail(
+  args: { to: string | string[]; subject: string; html: string },
+): Promise<void> {
+  try {
+    await sendMailRaw(args)
+  } catch (error) {
+    logError(`sync.ts: failed to send "${args.subject}" email`, error)
+  }
 }
 
 // runs the sync and always emails the outcome — reused by both this file's
@@ -438,8 +495,136 @@ export async function runSyncAndEmail(): Promise<{ ok: boolean }> {
   }
 }
 
+function renderEveningCheckEmail(
+  before: DiscrepancyCheck,
+  after: DiscrepancyCheck | null,
+  logPath: string,
+): { subject: string; html: string } {
+  const rows: [string, string][] = [
+    [
+      'Discrepancy found',
+      `db=${before.dbCount} api=${before.apiTotal} gap=${before.gap}`,
+    ],
+  ]
+  if (after) {
+    rows.push([
+      'After full-term resync',
+      `db=${after.dbCount} api=${after.apiTotal} gap=${after.gap}`,
+    ])
+  }
+  rows.push(['Log file', logPath])
+
+  const closed = after !== null && after.gap === 0
+
+  const html = `
+    <div style="font-family: sans-serif; font-size: 14px; color: #000;">
+      <p><b>${
+    closed
+      ? 'Evening check found and closed a period line discrepancy.'
+      : 'Evening check found a period line discrepancy.'
+  }</b></p>
+      <table cellpadding="4" cellspacing="0" border="0">
+        ${
+    rows.map(([label, value]) =>
+      `<tr><td style="color: #666;">${label}</td><td><b>${value}</b></td></tr>`
+    ).join('')
+  }
+      </table>
+    </div>
+  `
+
+  return {
+    // plain ASCII — see renderSyncFailureEmail's comment on the same subject
+    // -encoding bug in denomailer.
+    subject: closed
+      ? '[Compass Sync] Evening check - discrepancy closed'
+      : '[Compass Sync] Evening check - discrepancy remains',
+    html,
+  }
+}
+
+// runs a cheap discrepancy check (see checkPeriodLineDiscrepancy) and, only
+// if it finds a gap, follows up with a full-term forced resync — a repeat of
+// the normal sync's trailing resync but widened from TRAILING_RESYNC_DAYS to
+// the whole year-to-date window, since a gap surviving to this check means
+// the drift wasn't within the last 14 days. Silent (no email) on evenings
+// with no discrepancy; emails a short notice whenever a gap is found,
+// whether or not the resync fully closes it.
+export async function runEveningCheckAndEmail(): Promise<{ ok: boolean }> {
+  const logPath = startRun('cron-evening-check')
+  log(`sync.ts: evening discrepancy check starting, logging to ${logPath}`)
+
+  try {
+    let before: DiscrepancyCheck | undefined
+    let after: DiscrepancyCheck | null = null
+    let checkError: unknown
+
+    try {
+      currentStage = 'running trailing resync from Compass'
+      await runTrailingResync(syncWindowEnd())
+
+      currentStage = 'checking period line count against Compass'
+      before = await checkPeriodLineDiscrepancy()
+      log(
+        `sync.ts: evening check — db=${before.dbCount} api=${before.apiTotal} gap=${before.gap}`,
+      )
+
+      if (before.gap !== 0) {
+        log(
+          `sync.ts: evening check — gap of ${before.gap} found, running full-term forced resync`,
+        )
+        currentStage = 'running full-term forced resync (evening discrepancy remediation)'
+        const windowEnd = syncWindowEnd()
+        let resyncedCount = 0
+        await attendanceGetPeriodLinesBetweenBounds(
+          config.year.start,
+          windowEnd,
+          FIRST_SYNC_TIMESTAMP,
+          async (page) => {
+            await upsertPeriodLines(page)
+            resyncedCount += page.length
+            log(`sync.ts: evening resync upserted ${resyncedCount} period lines so far`)
+          },
+        )
+        log(
+          `sync.ts: evening resync done, upserted ${resyncedCount} period lines total`,
+        )
+
+        currentStage = 'checking period line count against Compass (after resync)'
+        after = await checkPeriodLineDiscrepancy()
+        log(
+          `sync.ts: evening check after resync — db=${after.dbCount} api=${after.apiTotal} gap=${after.gap}`,
+        )
+      }
+    } catch (error) {
+      checkError = error
+    }
+
+    if (checkError) {
+      const { subject, html } = renderSyncFailureEmail(checkError, logPath)
+      await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
+      logError('sync.ts: evening discrepancy check failed', checkError)
+      return { ok: false }
+    }
+
+    if (!before || before.gap === 0) {
+      log('sync.ts: evening check — no discrepancy, nothing to do')
+      return { ok: true }
+    }
+
+    const { subject, html } = renderEveningCheckEmail(before, after, logPath)
+    await sendMail({ to: mailConfig.syncSummaryRecipients, subject, html })
+    log('sync.ts: evening discrepancy check complete')
+    return { ok: true }
+  } finally {
+    endRun()
+  }
+}
+
 if (import.meta.main) {
-  const { ok } = await runSyncAndEmail()
+  const { ok } = Deno.args.includes('--evening-check')
+    ? await runEveningCheckAndEmail()
+    : await runSyncAndEmail()
   await sql.end()
   if (!ok) {
     Deno.exit(1)

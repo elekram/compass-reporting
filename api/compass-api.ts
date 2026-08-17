@@ -236,6 +236,48 @@ export async function attendanceGetPeriodLinesBetweenBounds(
   return lines
 }
 
+// same lBound/uBound/modifiedSinceTimestamp semantics as
+// attendanceGetPeriodLinesBetweenBounds, but take=1 — only "total" is read
+// from the response, so this is a single request rather than a full
+// paginated fetch. Used by sync.ts to check the synced row count against
+// Compass's own count without downloading every row again.
+export async function attendanceGetPeriodLinesTotal(
+  start: string,
+  end: string,
+  modifiedSinceTimestamp: string = '2023-08-01T05:46:30Z',
+): Promise<number> {
+  const endpoint = '/API/V4/Attendance/GetPeriodLinesTracking'
+  const response = await fetchWithRetry(
+    `https://${getSchoolUrl()}${endpoint}`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(
+        {
+          'request': {
+            'lBound': `${start}T00:00:00Z`,
+            'uBound': `${end}T00:00:00Z`,
+            'modifiedSinceTimestamp': modifiedSinceTimestamp,
+            'skip': 0,
+            'take': 1,
+          },
+        },
+      ),
+    },
+  )
+
+  const data = await textOrThrow(response, endpoint)
+  const parsed: CompassApiResponseEnvelope<PeriodAttendanceLine> = JSON.parse(data)
+  if (parsed.d?.success === false) {
+    throw new Error(
+      `Compass API ${endpoint} reported failure: ${
+        parsed.d.errorMessage ?? '(no error message)'
+      }`,
+    )
+  }
+  return parsed.d.total
+}
+
 export async function attendanceGetLines(start: string, end: string): Promise<
   Array<AttendancePeriodLine>
 > {

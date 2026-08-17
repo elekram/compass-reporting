@@ -1,6 +1,6 @@
 import config from './config/config.ts'
 import cronConfig from './config/cron-config.ts'
-import { runSyncAndEmail } from './sync.ts'
+import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'
 import {
   buildFullReportData,
   buildSubjectLine,
@@ -114,8 +114,23 @@ Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
   await runDailyJob()
 })
 
+// second tick, same non-overlap/no-catch-up caveats as the job above — see
+// sync.ts's runEveningCheckAndEmail for what this actually does (nothing
+// unless it finds a period-line discrepancy) and for its own log-run
+// handling (no wrapping needed here, unlike runDailyJob — there's nothing
+// else in this tick to share a log file with).
+Deno.cron('evening-discrepancy-check', '*/5 * * * *', async () => {
+  if (currentMelbourneTime() !== cronConfig.eveningCheckTimeLocal) {
+    return
+  }
+  if (!isMelbourneWeekday()) {
+    return
+  }
+  await runEveningCheckAndEmail()
+})
+
 console.log(
-  `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${MELBOURNE_TIMEZONE} (debugMode: ${cronConfig.debugMode})`,
+  `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${MELBOURNE_TIMEZONE}, evening discrepancy check fires at ${cronConfig.eveningCheckTimeLocal} ${MELBOURNE_TIMEZONE} (debugMode: ${cronConfig.debugMode})`,
 )
 
 // registering the cron job above is enough to keep the process (and the

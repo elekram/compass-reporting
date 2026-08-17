@@ -51,6 +51,14 @@ const cronConfig = {
   // :10/etc) to actually line up with that tick.
   runTimeLocal: '07:30',
 
+  // second daily firing, same 5-minute-tick mechanism as runTimeLocal — runs
+  // a cheap DB-vs-Compass row count check (see sync.ts's
+  // checkPeriodLineDiscrepancy) and, only if it finds a gap, a full-term
+  // forced resync to close it. Deliberately well after the morning run and
+  // the school day's marking, so a resync (if triggered) has all evening/
+  // overnight to finish. Must also land on a 5-minute mark.
+  eveningCheckTimeLocal: '21:00',
+
   // while true, every report email cron.ts sends goes to debugRecipients
   // instead of that report's own `recipients` — lets you test the full daily
   // pipeline (sync + all enabled reports) without coordinators receiving
