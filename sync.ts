@@ -29,6 +29,33 @@ const FIRST_SYNC_TIMESTAMP = '2023-08-01T05:46:30Z'
 // every run until it's within this window.
 const TRAILING_RESYNC_DAYS = 14
 
+// only a positive gap above this many rows is worth a full-term forced
+// resync (see runEveningCheckAndEmail). A negative gap (DB has more rows
+// than Compass is currently reporting) can't be fixed by resyncing from
+// Compass at all — re-fetching the same source can't remove rows the API
+// isn't reporting. And small positive gaps are within the kind of
+// day-to-day pagination-total noise this check otherwise chases at a cost
+// of 3-4 hours per run for no real gain (confirmed in practice: a gap of
+// -142 triggered a ~3h40m resync that changed the DB row count by exactly
+// 1). Sourced from deno.env rather than baked in since "how big a gap
+// counts as real" is a judgment call that may need retuning without a code
+// change.
+const discrepancyEscalationThresholdRaw = Deno.env.get(
+  'DISCREPANCY_ESCALATION_THRESHOLD',
+)
+if (!discrepancyEscalationThresholdRaw) {
+  throw new Error('DISCREPANCY_ESCALATION_THRESHOLD is not set in deno.env')
+}
+const DISCREPANCY_ESCALATION_THRESHOLD = Number(discrepancyEscalationThresholdRaw)
+if (
+  !Number.isInteger(DISCREPANCY_ESCALATION_THRESHOLD) ||
+  DISCREPANCY_ESCALATION_THRESHOLD < 0
+) {
+  throw new Error(
+    `DISCREPANCY_ESCALATION_THRESHOLD must be a non-negative integer in deno.env (got "${discrepancyEscalationThresholdRaw}")`,
+  )
+}
+
 const SCHOOL_TIMEZONE = 'Australia/Melbourne'
 
 // the API's uBound is sent as `${end}T00:00:00Z` — an *instant*, not a local
@@ -218,13 +245,17 @@ interface DiscrepancyCheck {
   gap: number
 }
 
-// compares Compass's own row count for the full year-to-date window against
-// what's actually in period_lines for that window — a cheap (take=1) way to
-// detect the skip/take pagination drift described above (see
-// TRAILING_RESYNC_DAYS), independent of whether the drift happened recently
-// enough for the trailing resync to have already caught it.
-async function checkPeriodLineDiscrepancy(): Promise<DiscrepancyCheck> {
-  const windowEnd = syncWindowEnd()
+// compares Compass's own row count for the year-to-date window against what's
+// actually in period_lines for that window — a cheap (take=1) way to detect
+// the skip/take pagination drift described above (see TRAILING_RESYNC_DAYS),
+// independent of whether the drift happened recently enough for the trailing
+// resync to have already caught it. windowEnd is caller-supplied rather than
+// computed here so a before/after pair (see runEveningCheckAndEmail) compares
+// against the same window throughout — a multi-hour remediation resync that
+// crosses midnight would otherwise see syncWindowEnd() advance to include a
+// whole new day between the two calls, reporting a "gap" that's really just
+// the window having moved rather than anything left unsynced.
+async function checkPeriodLineDiscrepancy(windowEnd: string): Promise<DiscrepancyCheck> {
   const apiTotal = await attendanceGetPeriodLinesTotal(
     config.year.start,
     windowEnd,
@@ -500,28 +531,39 @@ function renderEveningCheckEmail(
   after: DiscrepancyCheck | null,
   logPath: string,
 ): { subject: string; html: string } {
+  const escalated = after !== null
+
   const rows: [string, string][] = [
     [
       'Discrepancy found',
       `db=${before.dbCount} api=${before.apiTotal} gap=${before.gap}`,
     ],
   ]
-  if (after) {
+  if (escalated) {
     rows.push([
       'After full-term resync',
       `db=${after.dbCount} api=${after.apiTotal} gap=${after.gap}`,
     ])
+  } else {
+    rows.push([
+      'Action taken',
+      before.gap < 0
+        ? 'none — gap is negative, so a resync from Compass cannot close it'
+        : `none — gap is at or below the ${DISCREPANCY_ESCALATION_THRESHOLD}-row escalation threshold`,
+    ])
   }
   rows.push(['Log file', logPath])
 
-  const closed = after !== null && after.gap === 0
+  const closed = escalated && after.gap === 0
 
   const html = `
     <div style="font-family: sans-serif; font-size: 14px; color: #000;">
       <p><b>${
     closed
       ? 'Evening check found and closed a period line discrepancy.'
-      : 'Evening check found a period line discrepancy.'
+      : escalated
+      ? 'Evening check found a period line discrepancy.'
+      : 'Evening check noted a period line discrepancy (below the threshold to act on).'
   }</b></p>
       <table cellpadding="4" cellspacing="0" border="0">
         ${
@@ -538,18 +580,22 @@ function renderEveningCheckEmail(
     // -encoding bug in denomailer.
     subject: closed
       ? '[Compass Sync] Evening check - discrepancy closed'
-      : '[Compass Sync] Evening check - discrepancy remains',
+      : escalated
+      ? '[Compass Sync] Evening check - discrepancy remains'
+      : '[Compass Sync] Evening check - discrepancy noted',
     html,
   }
 }
 
 // runs a cheap discrepancy check (see checkPeriodLineDiscrepancy) and, only
-// if it finds a gap, follows up with a full-term forced resync — a repeat of
-// the normal sync's trailing resync but widened from TRAILING_RESYNC_DAYS to
-// the whole year-to-date window, since a gap surviving to this check means
-// the drift wasn't within the last 14 days. Silent (no email) on evenings
-// with no discrepancy; emails a short notice whenever a gap is found,
-// whether or not the resync fully closes it.
+// if it finds a gap exceeding DISCREPANCY_ESCALATION_THRESHOLD, follows up
+// with a full-term forced resync — a repeat of the normal sync's trailing
+// resync but widened from TRAILING_RESYNC_DAYS to the whole year-to-date
+// window, since a gap surviving to this check means the drift wasn't within
+// the last 14 days. Silent (no email) on evenings with no discrepancy at
+// all; emails a short notice whenever a nonzero gap is found, whether or not
+// it was above the threshold, negative, or resynced and left unclosed —
+// see renderEveningCheckEmail.
 export async function runEveningCheckAndEmail(): Promise<{ ok: boolean }> {
   const logPath = startRun('cron-evening-check')
   log(`sync.ts: evening discrepancy check starting, logging to ${logPath}`)
@@ -559,22 +605,27 @@ export async function runEveningCheckAndEmail(): Promise<{ ok: boolean }> {
     let after: DiscrepancyCheck | null = null
     let checkError: unknown
 
+    // pinned once and reused for the trailing resync and both discrepancy
+    // checks — see checkPeriodLineDiscrepancy's comment for why letting each
+    // call recompute "now" independently is a problem for a remediation that
+    // can run for hours.
+    const windowEnd = syncWindowEnd()
+
     try {
       currentStage = 'running trailing resync from Compass'
-      await runTrailingResync(syncWindowEnd())
+      await runTrailingResync(windowEnd)
 
       currentStage = 'checking period line count against Compass'
-      before = await checkPeriodLineDiscrepancy()
+      before = await checkPeriodLineDiscrepancy(windowEnd)
       log(
         `sync.ts: evening check — db=${before.dbCount} api=${before.apiTotal} gap=${before.gap}`,
       )
 
-      if (before.gap !== 0) {
+      if (before.gap > DISCREPANCY_ESCALATION_THRESHOLD) {
         log(
-          `sync.ts: evening check — gap of ${before.gap} found, running full-term forced resync`,
+          `sync.ts: evening check — gap of ${before.gap} exceeds ${DISCREPANCY_ESCALATION_THRESHOLD}-row threshold, running full-term forced resync`,
         )
         currentStage = 'running full-term forced resync (evening discrepancy remediation)'
-        const windowEnd = syncWindowEnd()
         let resyncedCount = 0
         await attendanceGetPeriodLinesBetweenBounds(
           config.year.start,
@@ -591,9 +642,17 @@ export async function runEveningCheckAndEmail(): Promise<{ ok: boolean }> {
         )
 
         currentStage = 'checking period line count against Compass (after resync)'
-        after = await checkPeriodLineDiscrepancy()
+        after = await checkPeriodLineDiscrepancy(windowEnd)
         log(
           `sync.ts: evening check after resync — db=${after.dbCount} api=${after.apiTotal} gap=${after.gap}`,
+        )
+      } else if (before.gap !== 0) {
+        log(
+          `sync.ts: evening check — gap of ${before.gap} not worth resyncing (${
+            before.gap < 0
+              ? 'negative — a resync from Compass cannot close it'
+              : `at or below the ${DISCREPANCY_ESCALATION_THRESHOLD}-row threshold`
+          })`,
         )
       }
     } catch (error) {

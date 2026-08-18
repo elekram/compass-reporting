@@ -7,3 +7,4 @@ deno.env
 /*.csv
 /email-templates/preview-*.html
 /logs
+/production-logs

@@ -51,13 +51,27 @@ const cronConfig = {
   // :10/etc) to actually line up with that tick.
   runTimeLocal: '07:30',
 
-  // second daily firing, same 5-minute-tick mechanism as runTimeLocal — runs
-  // a cheap DB-vs-Compass row count check (see sync.ts's
+  // weekly firing, same 5-minute-tick mechanism as runTimeLocal — runs a
+  // cheap DB-vs-Compass row count check (see sync.ts's
   // checkPeriodLineDiscrepancy) and, only if it finds a gap, a full-term
   // forced resync to close it. Deliberately well after the morning run and
   // the school day's marking, so a resync (if triggered) has all evening/
   // overnight to finish. Must also land on a 5-minute mark.
   eveningCheckTimeLocal: '21:00',
+
+  // which Melbourne weekday (cron.ts's currentMelbourneWeekday format —
+  // "Mon"/"Tue"/etc) the evening check fires on. Weekly rather than nightly:
+  // the full-term resync it can trigger processes 10x the rows the old daily
+  // trailing-resync-only baseline did, and running it every weeknight left
+  // the process's V8 heap high-water-mark elevated going into the very next
+  // morning's report generation — the heaviest single step this app does —
+  // with only ~6-7 hours for it to settle. Confirmed cause of a 2026-08-18
+  // OOM crash. Friday gives it the whole weekend (no cron jobs fire on
+  // Sat/Sun) before Monday's report run. Any drift within the last 14 days
+  // still self-heals every single morning regardless, via runSync's own
+  // trailing resync — this only affects how quickly *older* drift gets
+  // caught and escalated.
+  eveningCheckDayLocal: 'Fri',
 
   // while true, every report email cron.ts sends goes to debugRecipients
   // instead of that report's own `recipients` — lets you test the full daily
