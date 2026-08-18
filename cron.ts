@@ -138,7 +138,7 @@ Deno.cron('evening-discrepancy-check', '*/5 * * * *', async () => {
 })
 
 console.log(
-  `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${MELBOURNE_TIMEZONE}, evening discrepancy check fires at ${cronConfig.eveningCheckTimeLocal} ${MELBOURNE_TIMEZONE} on ${cronConfig.eveningCheckDayLocal}s (debugMode: ${cronConfig.debugMode})`,
+  `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${MELBOURNE_TIMEZONE}, evening discrepancy check fires at ${cronConfig.eveningCheckTimeLocal} ${MELBOURNE_TIMEZONE} every ${cronConfig.eveningCheckDayLocal} (debugMode: ${cronConfig.debugMode})`,
 )
 
 // registering the cron job above is enough to keep the process (and the
