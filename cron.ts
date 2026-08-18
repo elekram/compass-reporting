@@ -1,3 +1,4 @@
+import './check-env.ts'
 import config from './config/config.ts'
 import cronConfig from './config/cron-config.ts'
 import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'

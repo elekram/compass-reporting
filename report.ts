@@ -1,3 +1,4 @@
+import './check-env.ts'
 import { stringify } from '@std/csv'
 import sql from './db.ts'
 import config from './config/config.ts'

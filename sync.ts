@@ -1,3 +1,4 @@
+import './check-env.ts'
 import sql from './db.ts'
 import {
   attendanceGetPeriodLinesBetweenBounds,

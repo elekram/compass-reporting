@@ -1,5 +1,6 @@
 {
   "tasks": {
+    "check-env": "deno run -A --env-file=./deno.env check-env.ts",
     "query": "deno run -A --env-file=./deno.env compass-query.ts",
     "sync": "deno run -A --env-file=./deno.env sync.ts",
     "evening-check": "deno run -A --env-file=./deno.env sync.ts --evening-check",
