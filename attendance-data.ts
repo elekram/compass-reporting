@@ -4,9 +4,12 @@ import {
   calculateAttendancePercentages,
   PRESENT_STATUS_EXPORT_ID,
   REPORTABLE_STATUS_EXPORT_IDS,
+  STATUS_GROUP_LABELS,
+  STATUS_GROUPS,
   UNEXPLAINED_STATUS_EXPORT_ID,
 } from './api/compass-api.helpers.ts'
 import {
+  AssembledAttendancePeriodLine,
   AttendanceStatus,
   PeriodAttendanceLine,
   StudentAttendancePercentage,
@@ -757,4 +760,156 @@ export function buildSubjectLine(
     },
   )
   return `[Absences] ${yearLabel} ${weekday} ${d}/${m}/${y}`
+}
+
+// ---- status-group percentage breakdown ----
+// Built for the principal-facing "attendance status breakdown" report
+// (status-group-report.ts) — a wholly separate data shape from
+// AttendanceDataset/AbsenceRow above (whole-school and per-year-level
+// percentages, not a per-student roster), so it does its own DB fetch here
+// rather than being derived from getStudentAttendance's output, which
+// doesn't retain per-line minutes. Mirrors getDailyPeriodBreakdown's
+// precedent of doing its own independent period_lines query rather than
+// reusing AttendanceDataset. Nothing above this point in the file is
+// touched by it, so the existing per-student reports are unaffected.
+
+export const STATUS_GROUP_PRESENT_LABEL = 'Present'
+export const STATUS_GROUP_OTHER_LABEL = 'Other'
+
+export interface StatusGroupBucket {
+  label: string
+  minutes: number
+  // null only when the owning scope has zero expected minutes.
+  percentage: number | null
+}
+
+export interface StatusGroupScope {
+  // 'Whole School' or a yearLevel value (e.g. '7'); 'Unknown' for students
+  // with no roster-matched year level.
+  label: string
+  totalExpectedMinutes: number
+  buckets: StatusGroupBucket[]
+}
+
+export interface StatusGroupPeriodBreakdown {
+  periodName: string
+  periodStart: string
+  periodEnd: string
+  wholeSchool: StatusGroupScope
+  yearLevels: StatusGroupScope[]
+}
+
+// bucket order is always Present, then STATUS_GROUPS in order, then Other —
+// callers (the email template) rely on this to zip a year-side and
+// term-side breakdown of the same scope together by index.
+function bucketStatusGroupMinutes(
+  lines: AssembledAttendancePeriodLine[],
+): StatusGroupBucket[] {
+  const totalMinutes = lines.reduce((sum, l) => sum + l.expectedMinutes, 0)
+
+  const presentMinutes = lines
+    .filter((l) => l.statusSchoolSystemExportIdentifier === PRESENT_STATUS_EXPORT_ID)
+    .reduce((sum, l) => sum + l.expectedMinutes, 0)
+
+  const groupMinutes = STATUS_GROUPS.map((group) =>
+    lines
+      .filter((l) =>
+        l.statusSchoolSystemExportIdentifier !== null &&
+        group.has(l.statusSchoolSystemExportIdentifier)
+      )
+      .reduce((sum, l) => sum + l.expectedMinutes, 0)
+  )
+
+  // everything not Present and not in one of the curated groups above —
+  // teaching-time activity codes, lates, suspensions, etc, plus any line
+  // whose status didn't match one in the statuses table at all.
+  const otherMinutes = totalMinutes - presentMinutes -
+    groupMinutes.reduce((a, b) => a + b, 0)
+
+  const raw = [
+    { label: STATUS_GROUP_PRESENT_LABEL, minutes: presentMinutes },
+    ...STATUS_GROUP_LABELS.map((label, i) => ({ label, minutes: groupMinutes[i] })),
+    { label: STATUS_GROUP_OTHER_LABEL, minutes: otherMinutes },
+  ]
+
+  return raw.map((b) => ({
+    ...b,
+    percentage: totalMinutes === 0
+      ? null
+      : Math.round((b.minutes / totalMinutes) * 1000) / 10,
+  }))
+}
+
+function buildStatusGroupScope(
+  label: string,
+  lines: AssembledAttendancePeriodLine[],
+): StatusGroupScope {
+  return {
+    label,
+    totalExpectedMinutes: lines.reduce((sum, l) => sum + l.expectedMinutes, 0),
+    buckets: bucketStatusGroupMinutes(lines),
+  }
+}
+
+// same numeric-then-alpha ordering as email-template.ts's groupByYearLevel,
+// duplicated locally rather than shared since that one is keyed off
+// AbsenceRow[], not raw period lines.
+function sortYearLevelKeys(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    const numericA = Number(a)
+    const numericB = Number(b)
+    if (!Number.isNaN(numericA) && !Number.isNaN(numericB)) {
+      return numericA - numericB
+    }
+    if (!Number.isNaN(numericA)) return -1
+    if (!Number.isNaN(numericB)) return 1
+    return a.localeCompare(b)
+  })
+}
+
+// status-group-report.ts's single DB-fetching entry point — teaching-time
+// only, minutes-weighted, matching how attendance % is calculated
+// everywhere else in this app (calculateAttendancePercentages).
+export async function getStatusGroupBreakdown(
+  period: Period,
+): Promise<StatusGroupPeriodBreakdown> {
+  const today = new Date().toISOString().substring(0, 10)
+  const end = today < period.end ? today : period.end
+
+  const [statusRows, students] = await Promise.all([
+    sql<StatusRow[]>`SELECT * FROM statuses`,
+    queryStudentRoster(),
+  ])
+  const statuses = statusRows.map(toAttendanceStatus)
+
+  const periodLines = await queryPeriodLines(period.start, addDaysIso(end, 1))
+  const assembled = assembleAttendanceReport(periodLines, statuses, students)
+  // unmatched students (no roster join — see the ~97% match rate caveat on
+  // personGetStudentsBasic) are dropped here, same as getStudentAttendance
+  // does — there's no year level to attribute them to, so keeping them
+  // would either inflate Whole School's denominator with unattributable
+  // lines or need its own non-actionable "Unknown" table.
+  const teachingLines = assembled.filter((l) => l.teachingTime && l.firstName !== null)
+
+  const byYearLevel = new Map<string, AssembledAttendancePeriodLine[]>()
+  for (const line of teachingLines) {
+    // every remaining line is roster-matched, so yearLevel is guaranteed
+    // non-null here (see queryStudentRoster/toStudentRosterEntry) — the
+    // fallback only guards the type, it never actually fires.
+    const key = line.yearLevel ?? 'Unknown'
+    if (!byYearLevel.has(key)) {
+      byYearLevel.set(key, [])
+    }
+    byYearLevel.get(key)!.push(line)
+  }
+
+  return {
+    periodName: period.name,
+    periodStart: period.start,
+    periodEnd: end,
+    wholeSchool: buildStatusGroupScope('Whole School', teachingLines),
+    yearLevels: sortYearLevelKeys([...byYearLevel.keys()]).map((key) =>
+      buildStatusGroupScope(key, byYearLevel.get(key)!)
+    ),
+  }
 }

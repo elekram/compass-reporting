@@ -79,14 +79,24 @@ export const REPORTABLE_STATUS_EXPORT_IDS = new Set([
 ])
 
 // stakeholder-specified groupings for the per-student breakdown row —
-// index order here is display order (left to right) in the report.
-const STATUS_GROUPS: Set<string>[] = [
+// index order here is display order (left to right) in the report. Exported
+// so attendance-data.ts's status-group-percentage breakdown (a separate,
+// newer report) can reuse the same groupings rather than defining its own.
+// email-template.ts keeps its own identical STATUS_GROUP_LABELS copy for
+// the existing per-student reports — left as-is rather than pointed at this
+// one, so those already-working reports stay untouched.
+export const STATUS_GROUPS: Set<string>[] = [
   new Set(['200', '201', '209']),
   new Set(['208', '300']),
   new Set(['211', '212']),
   new Set(['500', '806']),
   new Set(['807']),
 ]
+
+// display labels for STATUS_GROUPS, same index order — used by the new
+// status-group-email-template.ts. Not consumed by email-template.ts (see
+// above).
+export const STATUS_GROUP_LABELS = ['200/201/209', '208/300', '211/212', '500/806', '807']
 
 // only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
 // aren't tracked uniformly across students (see conversation on periodCode
