@@ -8,6 +8,15 @@ export interface ScheduledReport {
   recipients: string[]
 }
 
+// status-group-report.ts's report isn't a per-student ReportDefinition (see
+// its own comment for why), so it isn't one of the `reports` entries below
+// — it's sent by its own call in cron.ts's runDailyJob, gated by this
+// separate on/off switch and recipient list.
+export interface StatusGroupReportSchedule {
+  enabled: boolean
+  recipients: string[]
+}
+
 // debugMode/debugRecipients live in deno.env rather than as committed
 // literals — they're per-deployment (a dev copy wants debug on, production
 // wants it off), so baking them into this tracked file meant every dev clone
@@ -148,6 +157,17 @@ const cronConfig = {
     { reportId: 'explained-absences', enabled: false, recipients: [] },
     { reportId: 'unexplained-absences', enabled: false, recipients: [] },
   ] satisfies ScheduledReport[],
+
+  // principal-facing whole-school/per-year-level status-group breakdown
+  // (status-group-report.ts) — sent daily, right after the per-student
+  // reports above, from the same freshly synced data.
+  statusGroupReport: {
+    enabled: true,
+    recipients: [
+      'principalclass@cheltsec.vic.edu.au',
+      'lee@cheltsec.vic.edu.au',
+    ],
+  } satisfies StatusGroupReportSchedule,
 }
 
 export default cronConfig

@@ -9,6 +9,8 @@ import {
 } from './attendance-data.ts'
 import { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
+import { buildStatusGroupReportData } from './status-group-report.ts'
+import statusGroupEmailTemplate from './email-templates/status-group-email-template.ts'
 import { sendMail } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
@@ -83,6 +85,31 @@ async function sendScheduledReports() {
   }
 }
 
+// separate from sendScheduledReports/reports/registry.ts's ReportDefinition
+// machinery — see status-group-report.ts for why. Called from runDailyJob
+// right after the per-student reports so it reflects the same freshly
+// synced data, but wrapped in its own try/catch there so a failure in this
+// newer report can't affect delivery of (or the daily job's success/failure
+// signal for) the already-working per-student reports sent just above it.
+async function sendStatusGroupReport() {
+  if (!cronConfig.statusGroupReport.enabled) {
+    return
+  }
+
+  const recipients = cronConfig.debugMode
+    ? cronConfig.debugRecipients
+    : cronConfig.statusGroupReport.recipients
+  if (recipients.length === 0) {
+    log('cron.ts: skipping status-group-report — no recipients configured')
+    return
+  }
+
+  const data = await buildStatusGroupReportData()
+  const html = statusGroupEmailTemplate(data)
+  await sendMail({ to: recipients, subject: `[Compass] ${data.title}`, html })
+  log(`cron.ts: sent "${data.title}" to ${recipients.join(', ')}`)
+}
+
 async function runDailyJob() {
   const logPath = startRun('cron-daily')
   log(`cron.ts: daily job starting, logging to ${logPath}`)
@@ -97,6 +124,13 @@ async function runDailyJob() {
 
     log('cron.ts: sync ok, sending scheduled reports')
     await sendScheduledReports()
+
+    try {
+      await sendStatusGroupReport()
+    } catch (error) {
+      logError('cron.ts: status-group-report failed', error)
+    }
+
     log('cron.ts: daily job complete')
   } finally {
     endRun()
