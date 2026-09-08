@@ -98,6 +98,24 @@ export const STATUS_GROUPS: Set<string>[] = [
 // above).
 export const STATUS_GROUP_LABELS = ['200/201/209', '208/300', '211/212', '500/806', '807']
 
+// Compass's "late arrival at school" codes — distinct from
+// PRESENT_STATUS_EXPORT_ID (which "Late to Class", export id "100", already
+// falls under) and from the absence codes above. Four groups, in fixed
+// report-column order: Approved, Unapproved, Explained, Unexplained. Two
+// status rows in the `statuses` table both represent "Late Explained" — one
+// with export id "116", the other an older Compass config import that left
+// the literal string "111/116" in that field — both counted as Explained.
+export const LATE_ARRIVAL_GROUPS: Set<string>[] = [
+  new Set(['111']),
+  new Set(['113']),
+  new Set(['116', '111/116']),
+  new Set(['118']),
+]
+
+// display labels for LATE_ARRIVAL_GROUPS, same index order — used by
+// late-arrivals-report.ts and its email template.
+export const LATE_ARRIVAL_LABELS = ['Approved', 'Unapproved', 'Explained', 'Unexplained']
+
 // only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
 // aren't tracked uniformly across students (see conversation on periodCode
 // coverage), so including them would unevenly pad expectedMinutes.

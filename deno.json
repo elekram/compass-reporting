@@ -8,6 +8,7 @@
     "email-preview": "deno run -A --env-file=./deno.env email-preview.ts",
     "send-report": "deno run -A --env-file=./deno.env send-report.ts",
     "send-status-group-report": "deno run -A --env-file=./deno.env send-status-group-report.ts",
+    "send-late-arrivals-report": "deno run -A --env-file=./deno.env send-late-arrivals-report.ts",
     "cron": "deno run -A --unstable-cron --env-file=./deno.env cron.ts"
   },
   "fmt": {

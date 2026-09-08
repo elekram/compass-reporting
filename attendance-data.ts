@@ -2,6 +2,7 @@ import sql from './db.ts'
 import {
   assembleAttendanceReport,
   calculateAttendancePercentages,
+  LATE_ARRIVAL_GROUPS,
   PRESENT_STATUS_EXPORT_ID,
   REPORTABLE_STATUS_EXPORT_IDS,
   STATUS_GROUP_LABELS,
@@ -911,5 +912,99 @@ export async function getStatusGroupBreakdown(
     yearLevels: sortYearLevelKeys([...byYearLevel.keys()]).map((key) =>
       buildStatusGroupScope(key, byYearLevel.get(key)!)
     ),
+  }
+}
+
+// ---- late-arrivals-at-school report ----
+// Built for the per-year-level "[Lates] Year X" report (late-arrivals-
+// report.ts) — raw period-line counts per LATE_ARRIVAL_GROUPS code
+// (compass-api.helpers.ts), one row per student. Distinct from
+// STATUS_GROUPS/statusGroupCounts above (curated absence groupings, counted
+// as part of the year-scoped AbsenceRow) and from the status-group
+// percentage breakdown above — this is its own single-year-level, count-not-
+// percentage shape, so it does its own independent period_lines query
+// rather than being derived from either of those.
+
+export interface LateArrivalCounts {
+  // one count per LATE_ARRIVAL_LABELS entry, same order: Approved,
+  // Unapproved, Explained, Unexplained.
+  counts: number[]
+  total: number
+}
+
+export interface LateArrivalStudentCounts extends LateArrivalCounts {
+  compassPersonId: string
+  name: string
+  studentCode: string | null
+}
+
+export interface LateArrivalPeriodBreakdown {
+  periodName: string
+  periodStart: string
+  periodEnd: string
+  students: LateArrivalStudentCounts[]
+}
+
+function bucketLateArrivalCounts(
+  lines: AssembledAttendancePeriodLine[],
+): LateArrivalCounts {
+  const counts = LATE_ARRIVAL_GROUPS.map((group) =>
+    lines.filter((l) =>
+      l.statusSchoolSystemExportIdentifier !== null &&
+      group.has(l.statusSchoolSystemExportIdentifier)
+    ).length
+  )
+  return { counts, total: counts.reduce((a, b) => a + b, 0) }
+}
+
+// single DB-fetching entry point for one period, scoped to one yearLevel —
+// late-arrivals-report.ts calls this once for config.year and once for
+// config.getCurrentTerm() and zips the two by compassPersonId.
+export async function getLateArrivalCounts(
+  period: Period,
+  yearLevel: string,
+): Promise<LateArrivalPeriodBreakdown> {
+  const today = new Date().toISOString().substring(0, 10)
+  const end = today < period.end ? today : period.end
+
+  const [statusRows, roster] = await Promise.all([
+    sql<StatusRow[]>`SELECT * FROM statuses`,
+    queryStudentRoster(),
+  ])
+  const statuses = statusRows.map(toAttendanceStatus)
+
+  const periodLines = await queryPeriodLines(period.start, addDaysIso(end, 1))
+  const assembled = assembleAttendanceReport(periodLines, statuses, roster)
+  // same unmatched-student drop as getStatusGroupBreakdown/getStudentAttendance
+  // — a line with no roster join has no year level to scope by.
+  const teachingLines = assembled.filter((l) =>
+    l.teachingTime && l.firstName !== null && l.yearLevel === yearLevel
+  )
+
+  const byStudent = new Map<string, AssembledAttendancePeriodLine[]>()
+  for (const line of teachingLines) {
+    if (!byStudent.has(line.compassPersonId)) {
+      byStudent.set(line.compassPersonId, [])
+    }
+    byStudent.get(line.compassPersonId)!.push(line)
+  }
+
+  const students: LateArrivalStudentCounts[] = [...byStudent.entries()].map(
+    ([compassPersonId, studentLines]) => {
+      const { firstName, lastName, studentCode } = studentLines[0]
+      return {
+        compassPersonId,
+        name: `${firstName} ${lastName}`.trim(),
+        studentCode,
+        ...bucketLateArrivalCounts(studentLines),
+      }
+    },
+  )
+
+  return {
+    periodName: period.name,
+    periodStart: period.start,
+    periodEnd: end,
+    students,
   }
 }
