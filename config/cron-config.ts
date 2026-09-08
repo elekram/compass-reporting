@@ -17,6 +17,16 @@ export interface StatusGroupReportSchedule {
   recipients: string[]
 }
 
+// late-arrivals-report.ts's "[Lates] Year X" reports aren't ReportDefinitions
+// either (see their own comment for why) — sent by their own loop in
+// cron.ts's runDailyJob, one entry per year level, each with its own
+// on/off switch and recipient list, same shape as `reports` above.
+export interface LateArrivalsReportSchedule {
+  yearLevel: string
+  enabled: boolean
+  recipients: string[]
+}
+
 // debugMode/debugRecipients live in deno.env rather than as committed
 // literals — they're per-deployment (a dev copy wants debug on, production
 // wants it off), so baking them into this tracked file meant every dev clone
@@ -168,6 +178,67 @@ const cronConfig = {
       'lee@cheltsec.vic.edu.au',
     ],
   } satisfies StatusGroupReportSchedule,
+
+  // per-year-level "[Lates] Year X" late-arrivals-at-school reports — same
+  // recipient split as the explained-absences-year-X reports above
+  // (middleschool coordinators for 7-9, senior school coordinators for
+  // 10-12), sent daily alongside them.
+  lateArrivalsReports: [
+    {
+      yearLevel: '7',
+      enabled: true,
+      recipients: [
+        'middleschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
+    },
+    {
+      yearLevel: '8',
+      enabled: true,
+      recipients: [
+        'middleschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
+    },
+    {
+      yearLevel: '9',
+      enabled: true,
+      recipients: [
+        'middleschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
+    },
+    {
+      yearLevel: '10',
+      enabled: true,
+      recipients: [
+        'seniorschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
+    },
+    {
+      yearLevel: '11',
+      enabled: true,
+      recipients: [
+        'seniorschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
+    },
+    {
+      yearLevel: '12',
+      enabled: true,
+      recipients: [
+        'seniorschoolcoordinators@cheltsec.vic.edu.au',
+        'principalclass@cheltsec.vic.edu.au',
+        'lee@cheltsec.vic.edu.au',
+      ],
+    },
+  ] satisfies LateArrivalsReportSchedule[],
 }
 
 export default cronConfig

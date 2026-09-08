@@ -11,6 +11,8 @@ import { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
 import { buildStatusGroupReportData } from './status-group-report.ts'
 import statusGroupEmailTemplate from './email-templates/status-group-email-template.ts'
+import { buildLateArrivalReportData } from './late-arrivals-report.ts'
+import lateArrivalsEmailTemplate from './email-templates/late-arrivals-email-template.ts'
 import { sendMail } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
@@ -110,6 +112,44 @@ async function sendStatusGroupReport() {
   log(`cron.ts: sent "${data.title}" to ${recipients.join(', ')}`)
 }
 
+// same rationale as sendStatusGroupReport — separate from
+// sendScheduledReports/registry.ts, see late-arrivals-report.ts. One send
+// per enabled entry in cronConfig.lateArrivalsReports, sequentially, mirroring
+// sendScheduledReports' loop over cronConfig.reports.
+async function sendLateArrivalsReports() {
+  const enabledEntries = cronConfig.lateArrivalsReports.filter((entry) => entry.enabled)
+  let sentCount = 0
+
+  for (const entry of cronConfig.lateArrivalsReports) {
+    if (!entry.enabled) {
+      continue
+    }
+
+    const recipients = cronConfig.debugMode
+      ? cronConfig.debugRecipients
+      : entry.recipients
+    if (recipients.length === 0) {
+      log(
+        `cron.ts: skipping late-arrivals-report year ${entry.yearLevel} — no recipients configured`,
+      )
+      continue
+    }
+
+    const data = await buildLateArrivalReportData(
+      entry.yearLevel,
+      `[Lates] Year ${entry.yearLevel}`,
+    )
+    const html = lateArrivalsEmailTemplate(data)
+    await sendMail({ to: recipients, subject: data.title, html })
+    sentCount++
+    log(
+      `cron.ts: sent "${data.title}" to ${
+        recipients.join(', ')
+      } (${sentCount}/${enabledEntries.length})`,
+    )
+  }
+}
+
 async function runDailyJob() {
   const logPath = startRun('cron-daily')
   log(`cron.ts: daily job starting, logging to ${logPath}`)
@@ -129,6 +169,12 @@ async function runDailyJob() {
       await sendStatusGroupReport()
     } catch (error) {
       logError('cron.ts: status-group-report failed', error)
+    }
+
+    try {
+      await sendLateArrivalsReports()
+    } catch (error) {
+      logError('cron.ts: late-arrivals-reports failed', error)
     }
 
     log('cron.ts: daily job complete')
