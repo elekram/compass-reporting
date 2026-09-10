@@ -59,6 +59,14 @@ export const UNEXPLAINED_STATUS_EXPORT_ID = '500'
 // used to colour the daily period-breakdown table green.
 export const PRESENT_STATUS_EXPORT_ID = '100'
 
+// "0" is Compass's schoolSystemExportIdentifier for "Not Marked" — a period
+// line exists but a teacher hasn't completed the roll for it yet. Used by
+// the away-streak walk (attendance-data.ts's computeAwayStreaks) to treat an
+// unmarked period as away when every other period that day was flagged, per
+// stakeholder request — marking is the teacher's responsibility, not a
+// signal the student was actually present.
+export const NOT_MARKED_STATUS_EXPORT_ID = '0'
+
 // curated by the stakeholder — the specific countedAbsence reasons worth
 // reporting on. Other countedAbsence statuses (accident, hospitalised,
 // quarantine, suspension, extended family holiday, religious/cultural

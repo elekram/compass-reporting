@@ -3,6 +3,7 @@ import {
   assembleAttendanceReport,
   calculateAttendancePercentages,
   LATE_ARRIVAL_GROUPS,
+  NOT_MARKED_STATUS_EXPORT_ID,
   PRESENT_STATUS_EXPORT_ID,
   REPORTABLE_STATUS_EXPORT_IDS,
   STATUS_GROUP_LABELS,
@@ -74,9 +75,9 @@ export interface DailyBreakdownRow {
   awayStreakDays: number
 }
 
-// "more than three days in a row" per stakeholder request — a student's
-// awayStreakDays must exceed this (i.e. be 4+) to be highlighted.
-export const AWAY_STREAK_HIGHLIGHT_THRESHOLD = 3
+// "more than one day in a row" per stakeholder request — a student's
+// awayStreakDays must exceed this (i.e. be 2+) to be highlighted.
+export const AWAY_STREAK_HIGHLIGHT_THRESHOLD = 1
 
 // how many school days back the streak walk is willing to look — generous
 // upper bound (~8 school weeks) so a genuinely long absence isn't cut short, without
@@ -379,15 +380,29 @@ async function computeAwayStreaks(
     )
   }
 
+  // a day counts as "fully away" if every period is either flagged or
+  // simply not-yet-marked by a teacher (see NOT_MARKED_STATUS_EXPORT_ID) —
+  // provided at least one period that day was actually flagged, so a day
+  // nobody marked at all (e.g. a pupil-free day) doesn't count as away by
+  // default.
   function isFullyAway(studentId: string, day: string): boolean {
     const periods = codesByKey.get(`${studentId}|${day}`)
     if (!periods) {
       return false
     }
-    return TEACHING_PERIOD_CODES.every((code) => {
+    let hasFlaggedPeriod = false
+    const allAccountedFor = TEACHING_PERIOD_CODES.every((code) => {
       const exportId = periods.get(code)
-      return exportId != null && inclusionIds.has(exportId)
+      if (exportId === NOT_MARKED_STATUS_EXPORT_ID) {
+        return true
+      }
+      if (exportId != null && inclusionIds.has(exportId)) {
+        hasFlaggedPeriod = true
+        return true
+      }
+      return false
     })
+    return allAccountedFor && hasFlaggedPeriod
   }
 
   const streaks = new Map<string, number>()
