@@ -75,9 +75,9 @@ export interface DailyBreakdownRow {
   awayStreakDays: number
 }
 
-// "more than one day in a row" per stakeholder request — a student's
-// awayStreakDays must exceed this (i.e. be 2+) to be highlighted.
-export const AWAY_STREAK_HIGHLIGHT_THRESHOLD = 1
+// "3 or more days in a row" per stakeholder request — a student's
+// awayStreakDays must exceed this (i.e. be 3+) to be highlighted.
+export const AWAY_STREAK_HIGHLIGHT_THRESHOLD = 2
 
 // how many school days back the streak walk is willing to look — generous
 // upper bound (~8 school weeks) so a genuinely long absence isn't cut short, without
