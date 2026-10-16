@@ -1,6 +1,7 @@
 import './check-env.ts'
 import config from './config/config.ts'
 import cronConfig from './config/cron-config.ts'
+import { SCHOOL_TIMEZONE } from './config/timezone.ts'
 import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'
 import {
   buildFullReportData,
@@ -14,25 +15,24 @@ import statusGroupEmailTemplate from './email-templates/status-group-email-templ
 import { sendMail } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
-const MELBOURNE_TIMEZONE = 'Australia/Melbourne'
-
-// "HH:MM" in Melbourne local time, DST-aware via Intl (unlike a fixed UTC
-// cron expression, this doesn't need manual adjustment at the AEST/AEDT
-// changeover — see cronConfig.runTimeLocal).
-function currentMelbourneTime(): string {
+// "HH:MM" in school-local time (SCHOOL_TIMEZONE), DST-aware via Intl (unlike a
+// fixed UTC cron expression, this doesn't need manual adjustment at a
+// daylight-saving changeover — see cronConfig.runTimeLocal). The 'en-AU'
+// locale only fixes the output format ("07:30", "Mon"), whatever the zone.
+function currentSchoolTime(): string {
   return new Date().toLocaleTimeString('en-AU', {
-    timeZone: MELBOURNE_TIMEZONE,
+    timeZone: SCHOOL_TIMEZONE,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   })
 }
 
-// "Mon"/"Tue"/etc in Melbourne local time — shared by the weekday gate below
+// "Mon"/"Tue"/etc in school-local time — shared by the weekday gate below
 // and the evening check's single-weekday gate (cronConfig.eveningCheckDayLocal).
-function currentMelbourneWeekday(): string {
+function currentSchoolWeekday(): string {
   return new Date().toLocaleDateString('en-AU', {
-    timeZone: MELBOURNE_TIMEZONE,
+    timeZone: SCHOOL_TIMEZONE,
     weekday: 'short',
   })
 }
@@ -40,8 +40,8 @@ function currentMelbourneWeekday(): string {
 // school days only — Compass itself doesn't move on weekends, so a
 // Saturday/Sunday run would just re-sync an unchanged window and send
 // reports with nothing new to say.
-function isMelbourneWeekday(): boolean {
-  const day = currentMelbourneWeekday()
+function isSchoolWeekday(): boolean {
+  const day = currentSchoolWeekday()
   return day !== 'Sat' && day !== 'Sun'
 }
 
@@ -139,16 +139,16 @@ async function runDailyJob() {
 
 // Deno.cron schedules are UTC-only (see docs.deno.com/runtime/fundamentals/
 // cron) with no timezone parameter, so rather than bake a fixed UTC offset
-// in (which would drift an hour at every AEST/AEDT changeover), this ticks
-// every 5 minutes and only actually runs the job when the Melbourne
+// in (which would drift an hour at every daylight-saving changeover), this ticks
+// every 5 minutes and only actually runs the job when the school-local
 // wall-clock time matches cronConfig.runTimeLocal. Deno.cron guarantees
 // non-overlapping executions of the same job on its own, so there's no risk
 // of two ticks racing each other.
 Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
-  if (currentMelbourneTime() !== cronConfig.runTimeLocal) {
+  if (currentSchoolTime() !== cronConfig.runTimeLocal) {
     return
   }
-  if (!isMelbourneWeekday()) {
+  if (!isSchoolWeekday()) {
     log('cron.ts: skipping — weekend')
     return
   }
@@ -162,17 +162,17 @@ Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
 // else in this tick to share a log file with). Fires weekly, not nightly —
 // see cronConfig.eveningCheckDayLocal for why.
 Deno.cron('evening-discrepancy-check', '*/5 * * * *', async () => {
-  if (currentMelbourneTime() !== cronConfig.eveningCheckTimeLocal) {
+  if (currentSchoolTime() !== cronConfig.eveningCheckTimeLocal) {
     return
   }
-  if (currentMelbourneWeekday() !== cronConfig.eveningCheckDayLocal) {
+  if (currentSchoolWeekday() !== cronConfig.eveningCheckDayLocal) {
     return
   }
   await runEveningCheckAndEmail()
 })
 
 console.log(
-  `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${MELBOURNE_TIMEZONE}, evening discrepancy check fires at ${cronConfig.eveningCheckTimeLocal} ${MELBOURNE_TIMEZONE} every ${cronConfig.eveningCheckDayLocal} (debugMode: ${cronConfig.debugMode})`,
+  `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${SCHOOL_TIMEZONE}, evening discrepancy check fires at ${cronConfig.eveningCheckTimeLocal} ${SCHOOL_TIMEZONE} every ${cronConfig.eveningCheckDayLocal} (debugMode: ${cronConfig.debugMode})`,
 )
 
 // registering the cron job above is enough to keep the process (and the

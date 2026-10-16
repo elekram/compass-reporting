@@ -54,6 +54,7 @@ reachable at _sync_ time, not at _send_ time.
    **`deno.env`** (read by the app inside the container, via `--env-file`):
    ```
    TZ=Australia/Melbourne
+   SCHOOL_TIMEZONE=Australia/Melbourne
    COMPASS_SCHOOL_URL=yourschool.compass.education
    COMPASS_API_KEY=<compass api key>
    DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
@@ -68,6 +69,11 @@ reachable at _sync_ time, not at _send_ time.
    CRON_DEBUG_RECIPIENTS=you@example.com
    DISCREPANCY_ESCALATION_THRESHOLD=<rows>
    ```
+
+   `SCHOOL_TIMEZONE` is the school's IANA timezone name, e.g. `Australia/Melbourne` or
+   `Australia/Perth` (not an abbreviation like `AEST`, which has no daylight saving). It
+   decides the school's local day and wall-clock time everywhere: when the cron jobs fire,
+   the sync window, and how period lines are grouped into school days.
 
    `COMPASS_SCHOOL_URL` is the host you log in to Compass at, e.g.
    `yourschool.compass.education`. A full URL like `https://yourschool.compass.education/`
@@ -175,8 +181,8 @@ jobs, controlled by `config/cron-config.ts`:
 
 Settings:
 
-- `runTimeLocal` — Melbourne local time (`"HH:MM"`, must land on a 5-minute mark) the
-  daily job fires.
+- `runTimeLocal` — school-local time (`"HH:MM"` in `SCHOOL_TIMEZONE`, must land on a
+  5-minute mark) the daily job fires.
 - `eveningCheckTimeLocal` / `eveningCheckDayLocal` — when the evening check fires (e.g.
   `21:00` on `Fri`). Weekly rather than nightly because a full-year resync the night
   before a report run previously caused an out-of-memory crash; Friday leaves the weekend
@@ -192,10 +198,10 @@ Settings:
 - `statusGroupReport` — `enabled` switch and `recipients` for the status-group breakdown.
 
 **Why a 5-minute tick instead of a normal cron expression:** `Deno.cron` schedules are
-UTC-only with no timezone parameter. Baking Melbourne's UTC offset into a fixed cron
-expression would drift an hour at every AEST/AEDT changeover, so instead the job ticks
-every 5 minutes and only actually runs when the current Melbourne wall-clock time matches
-`runTimeLocal` — correct year-round with no manual adjustment.
+UTC-only with no timezone parameter. Baking the school's UTC offset into a fixed cron
+expression would drift an hour at every daylight-saving changeover, so instead the job
+ticks every 5 minutes and only actually runs when the current wall-clock time in
+`SCHOOL_TIMEZONE` matches `runTimeLocal` — correct year-round with no manual adjustment.
 
 Two things worth knowing about `Deno.cron` in general:
 

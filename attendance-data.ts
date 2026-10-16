@@ -16,6 +16,7 @@ import {
   StudentRosterEntry,
 } from './api/compass-api.types.ts'
 import { Period } from './config/config.ts'
+import { SCHOOL_TIMEZONE } from './config/timezone.ts'
 import { AbsenceCategory, ReportDefinition } from './reports/types.ts'
 
 // trend windows are always relative to today, independent of whatever
@@ -257,14 +258,13 @@ const TEACHING_PERIOD_CODES = ['1', '2', '3', '4', '5', '6']
 // above a partially-synced one.
 const MIN_STUDENTS_FOR_COMPLETE_DAY = 300
 
-// school timezone — `start` is stored as timestamptz (UTC instants), but
-// Melbourne is UTC+10/+11, so morning periods (e.g. period 1 at 08:50 local)
-// land on the *previous* UTC calendar date. Grouping/filtering by a raw
-// `start::date` (as this used to) splits a single local school day across
-// two UTC dates — Postgres's `AT TIME ZONE` handles the DST-aware
+// SCHOOL_TIMEZONE (config/timezone.ts) — `start` is stored as timestamptz (UTC
+// instants), but e.g. Melbourne is UTC+10/+11, so morning periods (period 1
+// at 08:50 local) land on the *previous* UTC calendar date. Grouping/filtering
+// by a raw `start::date` (as this used to) splits a single local school day
+// across two UTC dates — Postgres's `AT TIME ZONE` handles the DST-aware
 // conversion correctly, so all local-day logic goes through it rather than
 // JS Date arithmetic.
-const SCHOOL_TIMEZONE = 'Australia/Melbourne'
 
 // most recent complete days first (descending) — the daily breakdown
 // table renders them in this order, most recent day on top.

@@ -4,7 +4,9 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
         GRANT ALL PRIVILEGES ON DATABASE docker TO docker;
         \c docker
 
-        SET timezone = 'Australia/Melbourne';
+        -- no database timezone is set: timestamps are stored as timestamptz
+        -- (UTC instants), and every query that needs the school's local day
+        -- converts explicitly with AT TIME ZONE (deno.env's SCHOOL_TIMEZONE)
 
         CREATE TABLE period_lines (
                 period_line_id text PRIMARY KEY,

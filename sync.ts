@@ -13,6 +13,7 @@ import {
 } from './api/compass-api.types.ts'
 import config from './config/config.ts'
 import mailConfig from './config/mail-config.ts'
+import { SCHOOL_TIMEZONE } from './config/timezone.ts'
 import { sendMail as sendMailRaw } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
@@ -57,23 +58,23 @@ if (
   )
 }
 
-const SCHOOL_TIMEZONE = 'Australia/Melbourne'
-
 // the API's uBound is sent as `${end}T00:00:00Z` — an *instant*, not a local
-// calendar date (see attendanceGetPeriodLinesBetweenBounds) — so an `end` of
-// "2026-08-10" actually closes the window at 10am/11am Melbourne on the 10th,
-// not at local midnight. This used to be handed new Date().toISOString()'s UTC
-// date, which made it worse: the 07:30 Melbourne job runs at 21:30 UTC the
-// *previous* day, so `end` resolved to the previous UTC date and the window
-// shut at 10am on the very day being reported — periods 3-6 were never fetched
-// and rendered as "Unscheduled" in the daily breakdown. Taking today's
-// Melbourne date and adding a day puts the boundary at 10am tomorrow local,
-// safely past the end of today's last period, whatever the DST offset is.
+// calendar date (see attendanceGetPeriodLinesBetweenBounds) — so for a
+// Melbourne school an `end` of "2026-08-10" actually closes the window at
+// 10am/11am local on the 10th, not at local midnight. This used to be handed
+// new Date().toISOString()'s UTC date, which made it worse: the 07:30
+// Melbourne job runs at 21:30 UTC the *previous* day, so `end` resolved to the
+// previous UTC date and the window shut at 10am on the very day being
+// reported — periods 3-6 were never fetched and rendered as "Unscheduled" in
+// the daily breakdown. Taking today's school-local date and adding a day puts
+// the boundary at UTC midnight tomorrow — past the end of today's last period
+// for any school east of roughly UTC-6, which covers every region Compass
+// operates in.
 function syncWindowEnd(): string {
-  const melbourneToday = new Date().toLocaleDateString('en-CA', {
+  const schoolToday = new Date().toLocaleDateString('en-CA', {
     timeZone: SCHOOL_TIMEZONE,
   })
-  const end = new Date(`${melbourneToday}T00:00:00Z`)
+  const end = new Date(`${schoolToday}T00:00:00Z`)
   end.setUTCDate(end.getUTCDate() + 1)
   return end.toISOString().substring(0, 10)
 }

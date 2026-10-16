@@ -52,11 +52,11 @@ if (debugMode && debugRecipients.length === 0) {
 }
 
 const cronConfig = {
-  // Melbourne local time (24h "HH:MM") the daily sync + report run fires.
-  // cron.ts checks this against the current Australia/Melbourne wall-clock
-  // time on a 5-minute tick rather than baking a fixed UTC cron expression,
-  // so it stays correct across the AEST/AEDT changeover without needing a
-  // manual twice-yearly adjustment. Must land on a 5-minute mark (:00/:05/
+  // school-local time (24h "HH:MM", in deno.env's SCHOOL_TIMEZONE) the daily
+  // sync + report run fires. cron.ts checks this against the current
+  // school-local wall-clock time on a 5-minute tick rather than baking a fixed
+  // UTC cron expression, so it stays correct across daylight-saving
+  // changeovers without needing a manual twice-yearly adjustment. Must land on a 5-minute mark (:00/:05/
   // :10/etc) to actually line up with that tick.
   runTimeLocal: '07:30',
 
@@ -68,7 +68,7 @@ const cronConfig = {
   // overnight to finish. Must also land on a 5-minute mark.
   eveningCheckTimeLocal: '21:00',
 
-  // which Melbourne weekday (cron.ts's currentMelbourneWeekday format —
+  // which school-local weekday (cron.ts's currentSchoolWeekday format —
   // "Mon"/"Tue"/etc) the evening check fires on. Weekly rather than nightly:
   // the full-term resync it can trigger processes 10x the rows the old daily
   // trailing-resync-only baseline did, and running it every weeknight left

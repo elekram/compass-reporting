@@ -15,13 +15,15 @@
 // "true"/"false", DISCREPANCY_ESCALATION_THRESHOLD must be a non-negative
 // integer, MAIL_USERNAME/MAIL_PASSWORD are optional but must be set
 // together) stays with the module that owns it (config/cron-config.ts,
-// config/mail-config.ts, sync.ts, db.ts, api/compass-api.ts) rather than
+// config/mail-config.ts, config/timezone.ts, sync.ts, db.ts,
+// api/compass-api.ts) rather than
 // being duplicated here, so there's one place that decides what "valid"
 // means for each variable, not two that can drift apart.
 const requiredEnvVars = [
   'DB_URL',
   'COMPASS_API_KEY',
   'COMPASS_SCHOOL_URL',
+  'SCHOOL_TIMEZONE',
   'MAIL_HOST',
   'MAIL_PORT',
   'MAIL_SECURITY',
