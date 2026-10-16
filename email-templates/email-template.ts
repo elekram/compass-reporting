@@ -7,6 +7,7 @@ import {
   DailyPeriodCell,
   PeriodMetrics,
 } from '../attendance-data.ts'
+import { renderLogo } from './logo.ts'
 
 function escapeHtml(value: string): string {
   return value
@@ -607,7 +608,7 @@ export default function emailTemplate(data: AttendanceReportData): string {
                     <b>${escapeHtml(data.title)}</b>
                   </td>
                   <td style='width: 154px; text-align: right; vertical-align: middle;'>
-                    <img class="logo logo-white" src="https://www.cheltsec.vic.edu.au/sig/chelt-logo.png" width="154" height="61" style="width: 154px; height: 61px;">
+                    ${renderLogo()}
                   </td>
                 </tr>
               </table>

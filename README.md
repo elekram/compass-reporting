@@ -56,6 +56,7 @@ reachable at _sync_ time, not at _send_ time.
    TZ=Australia/Melbourne
    SCHOOL_TIMEZONE=Australia/Melbourne
    COMPASS_SCHOOL_URL=yourschool.compass.education
+   SCHOOL_LOGO_URL=https://www.yourschool.edu.au/logo.png
    COMPASS_API_KEY=<compass api key>
    DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
    MAIL_HOST=smtp.gmail.com
@@ -74,6 +75,10 @@ reachable at _sync_ time, not at _send_ time.
    `Australia/Perth` (not an abbreviation like `AEST`, which has no daylight saving). It
    decides the school's local day and wall-clock time everywhere: when the cron jobs fire,
    the sync window, and how period lines are grouped into school days.
+
+   `SCHOOL_LOGO_URL` is optional: the logo shown top-right in every report email. It must
+   be a public http(s) image URL, since email clients fetch it when the message is opened.
+   It's shown 154px wide, with the height following the image. Leave it out for no logo.
 
    `COMPASS_SCHOOL_URL` is the host you log in to Compass at, e.g.
    `yourschool.compass.education`. A full URL like `https://yourschool.compass.education/`
