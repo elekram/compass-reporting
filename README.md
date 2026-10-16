@@ -34,7 +34,7 @@ reachable at _sync_ time, not at _send_ time.
 
 - Docker + Docker Compose
 - A Compass API key (`COMPASS_API_KEY`)
-- An SMTP account to send from (currently Gmail, via an app password)
+- An SMTP account to send from (e.g. Gmail, via an app password)
 
 ## Setup
 
@@ -55,12 +55,21 @@ reachable at _sync_ time, not at _send_ time.
    TZ=Australia/Melbourne
    COMPASS_API_KEY=<compass api key>
    DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
+   MAIL_HOST=smtp.gmail.com
+   MAIL_PORT=465
+   MAIL_SECURE=true
+   MAIL_NO_REPLY_USERNAME=noreply@example.com
    MAIL_NO_REPLY_PASSWORD=<smtp app password>
    SYNC_SUMMARY_RECIPIENTS=you@example.com
    CRON_DEBUG_MODE=false
    CRON_DEBUG_RECIPIENTS=you@example.com
    DISCREPANCY_ESCALATION_THRESHOLD=<rows>
    ```
+
+   The `MAIL_*` variables are the SMTP account every email is sent from.
+   `MAIL_NO_REPLY_USERNAME` is both the login and the From address. `MAIL_SECURE` must be
+   exactly `true` (implicit TLS, usually port 465) or `false`. Prefer implicit TLS where
+   your provider offers it: denomailer's STARTTLS handling on port 587 has a known bug.
 
    `CRON_DEBUG_MODE` must be exactly `true` or `false` — `cron.ts` throws on startup for
    anything else (including unset) rather than defaulting, so a misconfigured copy can't
@@ -196,8 +205,8 @@ automatically at the start of each run, so `logs/` doesn't grow unbounded.
 ## Configuration files
 
 - `config/config.ts` — term/semester/year date ranges for the current school year.
-- `config/mail-config.ts` — SMTP settings and `syncSummaryRecipients` (who gets the sync
-  run summary/failure email).
+- `config/mail-config.ts` — reads and validates the SMTP settings (`MAIL_*`) and
+  `SYNC_SUMMARY_RECIPIENTS` (who gets the sync run summary/failure email) from `deno.env`.
 - `config/cron-config.ts` — see [Scheduling](#scheduling) above.
 - `check-env.ts` — the list of required `deno.env` variables.
 
