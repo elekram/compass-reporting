@@ -6,8 +6,8 @@
 // needs (see the DISCREPANCY_ESCALATION_THRESHOLD miss that would have hit
 // production on this feature's first deploy). Not imported by
 // compass-query.ts — that script is explicitly outside the sync/report
-// pipeline and only ever touches COMPASS_API_KEY (self-checked in
-// api/compass-api.ts), so requiring the rest here would be a needless extra
+// pipeline and only ever touches COMPASS_API_KEY and COMPASS_SCHOOL_URL
+// (both self-checked in api/compass-api.ts), so requiring the rest here would be a needless extra
 // dependency for it.
 //
 // Presence only, plus the one cross-key requirement below — the actual
@@ -21,6 +21,7 @@
 const requiredEnvVars = [
   'DB_URL',
   'COMPASS_API_KEY',
+  'COMPASS_SCHOOL_URL',
   'MAIL_HOST',
   'MAIL_PORT',
   'MAIL_SECURITY',

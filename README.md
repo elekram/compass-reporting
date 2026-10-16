@@ -33,7 +33,8 @@ reachable at _sync_ time, not at _send_ time.
 ## Requirements
 
 - Docker + Docker Compose
-- A Compass API key (`COMPASS_API_KEY`)
+- Your school's Compass host (`COMPASS_SCHOOL_URL`) and a Compass API key
+  (`COMPASS_API_KEY`)
 - An SMTP account to send from (e.g. Gmail, via an app password)
 
 ## Setup
@@ -53,6 +54,7 @@ reachable at _sync_ time, not at _send_ time.
    **`deno.env`** (read by the app inside the container, via `--env-file`):
    ```
    TZ=Australia/Melbourne
+   COMPASS_SCHOOL_URL=yourschool.compass.education
    COMPASS_API_KEY=<compass api key>
    DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
    MAIL_HOST=smtp.gmail.com
@@ -66,6 +68,10 @@ reachable at _sync_ time, not at _send_ time.
    CRON_DEBUG_RECIPIENTS=you@example.com
    DISCREPANCY_ESCALATION_THRESHOLD=<rows>
    ```
+
+   `COMPASS_SCHOOL_URL` is the host you log in to Compass at, e.g.
+   `yourschool.compass.education`. A full URL like `https://yourschool.compass.education/`
+   also works; anything with a path after the host is rejected.
 
    The `MAIL_*` variables are the SMTP server every email is sent through:
 

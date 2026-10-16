@@ -37,8 +37,31 @@ interface CompassFlatArrayEnvelope<T> {
   d: T[]
 }
 
+// the school's own Compass host (e.g. "cheltsec-vic.compass.education"),
+// from deno.env so the same code can point at any school's instance. Read on
+// each call and self-checked, same as COMPASS_API_KEY in getHeaders below, so
+// compass-query.ts (which skips check-env.ts) still gets a clear error.
+// Accepts a pasted URL too ("https://<host>/") and reduces it to the bare
+// host every caller here prefixes with https:// and an endpoint path.
 export function getSchoolUrl() {
-  return 'cheltsec-vic.compass.education'
+  const raw = Deno.env.get('COMPASS_SCHOOL_URL')
+  if (!raw) {
+    throw new Error('COMPASS_SCHOOL_URL is not set in deno.env')
+  }
+
+  let host: string
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`)
+    if (url.pathname !== '/' || url.search || url.hash) {
+      throw new Error('has a path')
+    }
+    host = url.host
+  } catch {
+    throw new Error(
+      `COMPASS_SCHOOL_URL must be the school's Compass host, e.g. "yourschool.compass.education" (got "${raw}")`,
+    )
+  }
+  return host
 }
 
 // plain fetch() hangs indefinitely on a dropped connection with no error and
