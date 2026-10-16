@@ -2,6 +2,7 @@ import './check-env.ts'
 import config from './config/config.ts'
 import cronConfig from './config/cron-config.ts'
 import { SCHOOL_TIMEZONE } from './config/timezone.ts'
+import { STATUS_GROUP_REPORT_ID } from './config/report-env-keys.ts'
 import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'
 import {
   buildFullReportData,
@@ -173,6 +174,19 @@ Deno.cron('evening-discrepancy-check', '*/5 * * * *', async () => {
 
 console.log(
   `cron.ts: registered — daily job fires at ${cronConfig.runTimeLocal} ${SCHOOL_TIMEZONE}, evening discrepancy check fires at ${cronConfig.eveningCheckTimeLocal} ${SCHOOL_TIMEZONE} every ${cronConfig.eveningCheckDayLocal} (debugMode: ${cronConfig.debugMode})`,
+)
+
+// which reports deno.env's REPORT_RECIPIENTS_* variables actually scheduled —
+// logged once at startup so a missing or misplaced variable shows up in
+// `docker compose logs` straight away, not as a report that never arrives.
+const scheduledIds = [
+  ...cronConfig.reports.filter((r) => r.enabled).map((r) => r.reportId),
+  ...(cronConfig.statusGroupReport.enabled ? [STATUS_GROUP_REPORT_ID] : []),
+]
+console.log(
+  `cron.ts: scheduled reports — ${
+    scheduledIds.length > 0 ? scheduledIds.join(', ') : 'none (every report is disabled)'
+  }`,
 )
 
 // registering the cron job above is enough to keep the process (and the

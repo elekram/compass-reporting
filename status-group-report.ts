@@ -6,7 +6,7 @@ import {
   StatusGroupScope,
 } from './attendance-data.ts'
 
-// one status group's numbers across the year's 4 terms plus Year to Date —
+// one status group's numbers across the year's terms plus Year to Date —
 // the row shape stakeholder specified (see examples/status-table-layout-
 // example.csv): a percentage per term, a Trend row beneath showing the
 // change vs the immediately preceding term (blank for Term 1 — no prior
@@ -90,11 +90,12 @@ function buildTable(
 // point) instead of bent to fit the existing shape, so none of the
 // existing reports' code paths change.
 export async function buildStatusGroupReportData(): Promise<StatusGroupReportData> {
-  const [term1, term2, term3, term4, year] = await Promise.all([
-    ...config.terms.map((term) => getStatusGroupBreakdown(term)),
+  // any number of terms (config.terms comes from deno.env's TERM_n) — the
+  // email template renders one column per entry in termNames.
+  const [year, ...termBreakdowns] = await Promise.all([
     getStatusGroupBreakdown(config.year),
+    ...config.terms.map((term) => getStatusGroupBreakdown(term)),
   ])
-  const termBreakdowns = [term1, term2, term3, term4]
 
   const wholeSchool = buildTable(year.wholeSchool, termBreakdowns, (b) => b.wholeSchool)
   const yearLevels = year.yearLevels.map((yearScope) =>

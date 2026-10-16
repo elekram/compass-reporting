@@ -10,7 +10,7 @@
 // (both self-checked in api/compass-api.ts), so requiring the rest here would be a needless extra
 // dependency for it.
 //
-// Presence only, plus the one cross-key requirement below — the actual
+// Presence only, plus the cross-key requirements below — the actual
 // value validation for each variable (e.g. CRON_DEBUG_MODE must be exactly
 // "true"/"false", DISCREPANCY_ESCALATION_THRESHOLD must be a non-negative
 // integer, MAIL_USERNAME/MAIL_PASSWORD are optional but must be set
@@ -19,11 +19,16 @@
 // api/compass-api.ts) rather than
 // being duplicated here, so there's one place that decides what "valid"
 // means for each variable, not two that can drift apart.
+import { allReportKeys } from './config/report-env-keys.ts'
+
 const requiredEnvVars = [
   'DB_URL',
   'COMPASS_API_KEY',
   'COMPASS_SCHOOL_URL',
   'SCHOOL_TIMEZONE',
+  // only the first term is required here — TERM_2 onwards are read in order
+  // until the first gap (see config/config.ts).
+  'TERM_1',
   'MAIL_HOST',
   'MAIL_PORT',
   'MAIL_SECURITY',
@@ -31,6 +36,10 @@ const requiredEnvVars = [
   'SYNC_SUMMARY_RECIPIENTS',
   'CRON_DEBUG_MODE',
   'DISCREPANCY_ESCALATION_THRESHOLD',
+  // every report's on/off switch, one per report in the registry plus the
+  // status-group report — names from config/report-env-keys.ts, which reads
+  // no env itself and so is safe to import here (unlike cron-config.ts).
+  ...allReportKeys.map((keys) => keys.enabledKey),
 ]
 
 // CRON_DEBUG_RECIPIENTS is only required when CRON_DEBUG_MODE=true — see
@@ -39,6 +48,13 @@ const requiredEnvVars = [
 // it finds instead of letting this script report all of them at once.
 if (Deno.env.get('CRON_DEBUG_MODE') === 'true') {
   requiredEnvVars.push('CRON_DEBUG_RECIPIENTS')
+}
+
+// likewise, a report's recipients are only required while it's enabled.
+for (const keys of allReportKeys) {
+  if (Deno.env.get(keys.enabledKey) === 'true') {
+    requiredEnvVars.push(keys.recipientsKey)
+  }
 }
 
 const missing = requiredEnvVars.filter((key) => !Deno.env.get(key))

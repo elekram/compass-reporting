@@ -1,10 +1,20 @@
+import {
+  allReportKeys,
+  ENABLED_PREFIX,
+  RECIPIENTS_PREFIX,
+  registryReportKeys,
+  ReportEnvKeys,
+  statusGroupReportKeys,
+} from './report-env-keys.ts'
+
 export interface ScheduledReport {
   reportId: string
   // per-report on/off switch — cron.ts skips any entry with enabled: false
-  // entirely (no sync dependency, just skipped at send time).
+  // entirely (no sync dependency, just skipped at send time). From the
+  // report's REPORT_ENABLED_<id> variable in deno.env (see below).
   enabled: boolean
-  // real coordinator addresses — TODO: fill these in before turning
-  // debugMode off. Ignored entirely while debugMode is true (see below).
+  // real recipient addresses. Ignored entirely while debugMode is true (see
+  // below).
   recipients: string[]
 }
 
@@ -15,6 +25,84 @@ export interface ScheduledReport {
 export interface StatusGroupReportSchedule {
   enabled: boolean
   recipients: string[]
+}
+
+// which reports go out on the daily schedule, and to whom, lives in deno.env
+// rather than as committed literals — both are per-school. Two variables per
+// report (names from report-env-keys.ts):
+//   REPORT_ENABLED_<id>    — required, exactly "true" or "false". Kept
+//                            separate from the recipient list so a report
+//                            can be switched off and back on without
+//                            touching (or losing) its addresses.
+//   REPORT_RECIPIENTS_<id> — comma-separated addresses; required only when
+//                            the report is enabled.
+// the switch is required rather than defaulted, matching CRON_DEBUG_MODE: a
+// deployment missing it (say, a server pulled without its deno.env updated)
+// fails at startup instead of quietly sending nothing every morning while the
+// sync reports OK. Disabled reports are still sendable by hand via
+// send-report.
+function readEnabled(key: string): boolean {
+  const raw = Deno.env.get(key)
+  if (raw !== 'true' && raw !== 'false') {
+    throw new Error(
+      `${key} must be exactly "true" or "false" in deno.env (got ${
+        raw === undefined ? 'unset' : `"${raw}"`
+      })`,
+    )
+  }
+  return raw === 'true'
+}
+
+function readRecipients(key: string): string[] {
+  const recipients = (Deno.env.get(key) ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+  const invalid = recipients.filter((address) => !address.includes('@'))
+  if (invalid.length > 0) {
+    throw new Error(
+      `${key} in deno.env has invalid email address(es): ${invalid.join(', ')}`,
+    )
+  }
+  return recipients
+}
+
+function readReportSchedule(keys: ReportEnvKeys): ScheduledReport {
+  const enabled = readEnabled(keys.enabledKey)
+  const recipients = readRecipients(keys.recipientsKey)
+  // an enabled report with nobody to send to would just be skipped every
+  // morning with a log line — refused here instead, since it can only mean a
+  // missing or emptied recipients variable.
+  if (enabled && recipients.length === 0) {
+    throw new Error(
+      `${keys.enabledKey} is true but ${keys.recipientsKey} is not set in deno.env`,
+    )
+  }
+  return { reportId: keys.reportId, enabled, recipients }
+}
+
+// a misspelt variable name would otherwise just be ignored — refused at
+// startup instead, with the valid names listed.
+const knownKeys = allReportKeys.flatMap((k) => [k.enabledKey, k.recipientsKey])
+const unknownKeys = Object.keys(Deno.env.toObject()).filter((key) =>
+  (key.startsWith(ENABLED_PREFIX) || key.startsWith(RECIPIENTS_PREFIX)) &&
+  !knownKeys.includes(key)
+)
+if (unknownKeys.length > 0) {
+  throw new Error(
+    `deno.env has unknown report variable(s): ${unknownKeys.join(', ')}. Valid names: ${
+      knownKeys.join(', ')
+    }`,
+  )
+}
+
+const scheduledReports: ScheduledReport[] = registryReportKeys.map(readReportSchedule)
+
+const { enabled: statusGroupEnabled, recipients: statusGroupRecipients } =
+  readReportSchedule(statusGroupReportKeys)
+const statusGroupReport: StatusGroupReportSchedule = {
+  enabled: statusGroupEnabled,
+  recipients: statusGroupRecipients,
 }
 
 // debugMode/debugRecipients live in deno.env rather than as committed
@@ -92,82 +180,17 @@ const cronConfig = {
   debugMode,
   debugRecipients,
 
-  // one entry per report in reports/registry.ts that should be sent on the
-  // daily schedule. A report id with no entry here (or enabled: false) is
-  // simply never sent automatically — it's still reachable manually via
-  // `deno task send-report -- <id> <email>`.
-  reports: [
-    {
-      reportId: 'explained-absences-year-7',
-      enabled: true,
-      recipients: [
-        'middleschoolcoordinators@cheltsec.vic.edu.au',
-        'principalclass@cheltsec.vic.edu.au',
-        'lee@cheltsec.vic.edu.au',
-      ],
-    },
-    {
-      reportId: 'explained-absences-year-8',
-      enabled: true,
-      recipients: [
-        'middleschoolcoordinators@cheltsec.vic.edu.au',
-        'principalclass@cheltsec.vic.edu.au',
-        'lee@cheltsec.vic.edu.au',
-      ],
-    },
-    {
-      reportId: 'explained-absences-year-9',
-      enabled: true,
-      recipients: [
-        'middleschoolcoordinators@cheltsec.vic.edu.au',
-        'principalclass@cheltsec.vic.edu.au',
-        'lee@cheltsec.vic.edu.au',
-      ],
-    },
-    {
-      reportId: 'explained-absences-year-10',
-      enabled: true,
-      recipients: [
-        'seniorschoolcoordinators@cheltsec.vic.edu.au',
-        'principalclass@cheltsec.vic.edu.au',
-        'lee@cheltsec.vic.edu.au',
-      ],
-    },
-    {
-      reportId: 'explained-absences-year-11',
-      enabled: true,
-      recipients: [
-        'seniorschoolcoordinators@cheltsec.vic.edu.au',
-        'principalclass@cheltsec.vic.edu.au',
-        'lee@cheltsec.vic.edu.au',
-      ],
-    },
-    {
-      reportId: 'explained-absences-year-12',
-      enabled: true,
-      recipients: [
-        'seniorschoolcoordinators@cheltsec.vic.edu.au',
-        'principalclass@cheltsec.vic.edu.au',
-        'lee@cheltsec.vic.edu.au',
-      ],
-    },
-    // whole-school reports — off by default, not part of the year-level
-    // cadence this was built for. Flip on once there's a real audience for
-    // them (see the open heading-ambiguity caveat on these two reports).
-    { reportId: 'explained-absences', enabled: false, recipients: [] },
-    { reportId: 'unexplained-absences', enabled: false, recipients: [] },
-  ] satisfies ScheduledReport[],
+  // one entry per report in reports/registry.ts, in registry order — on or
+  // off per its REPORT_ENABLED_<id> variable in deno.env (see above). A
+  // disabled report is simply never sent automatically — it's still
+  // reachable manually via `deno task send-report -- <id> <email>`.
+  reports: scheduledReports,
 
   // principal-facing whole-school/per-year-level status-group breakdown
   // (status-group-report.ts) — sent daily, right after the per-student
-  // reports above, from the same freshly synced data.
-  statusGroupReport: {
-    enabled: true,
-    recipients: [
-      'principalclass@cheltsec.vic.edu.au',
-      'lee@cheltsec.vic.edu.au',
-    ],
-  } satisfies StatusGroupReportSchedule,
+  // reports above, from the same freshly synced data. Switched by
+  // REPORT_ENABLED_STATUS_GROUP_BREAKDOWN in deno.env.
+  statusGroupReport,
 }
 
 export default cronConfig

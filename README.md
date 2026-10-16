@@ -69,7 +69,43 @@ reachable at _sync_ time, not at _send_ time.
    CRON_DEBUG_MODE=false
    CRON_DEBUG_RECIPIENTS=you@example.com
    DISCREPANCY_ESCALATION_THRESHOLD=<rows>
+   TERM_1=2026-01-27,2026-04-02
+   TERM_2=2026-04-20,2026-06-26
+   TERM_3=2026-07-13,2026-09-18
+   TERM_4=2026-10-05,2026-12-18
+   REPORT_ENABLED_UNEXPLAINED_ABSENCES=false
+   REPORT_ENABLED_EXPLAINED_ABSENCES=false
+   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_7=true
+   REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_7=coordinator@example.com,principal@example.com
+   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_8=false
+   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_9=false
+   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_10=false
+   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_11=false
+   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_12=false
+   REPORT_ENABLED_STATUS_GROUP_BREAKDOWN=true
+   REPORT_RECIPIENTS_STATUS_GROUP_BREAKDOWN=principal@example.com
    ```
+
+   `TERM_1`, `TERM_2`, … are the current school year's terms, each `<start>,<end>` as
+   `YYYY-MM-DD` (both days included). They're read in order until the first missing
+   number, so a school with three or four terms just sets three or four. Each term must
+   start after the previous one ends. The year runs from the first term's start to the
+   last term's end. Update them at the start of each school year.
+
+   Each report has two variables, named after its id upper-cased with `-` turned into `_`
+   (e.g. `explained-absences-year-7` becomes `..._EXPLAINED_ABSENCES_YEAR_7`). The
+   term-by-term breakdown uses `..._STATUS_GROUP_BREAKDOWN`.
+   - `REPORT_ENABLED_<REPORT_ID>` is **required for every report** and must be exactly
+     `true` or `false`. It decides whether the report goes out on the daily schedule.
+   - `REPORT_RECIPIENTS_<REPORT_ID>` is the comma-separated list of who receives it. It's
+     only required while the report is enabled, so you can switch a report off and back on
+     without touching its recipients.
+
+   A disabled report can still be sent by hand with `send-report`. `check-env` lists any
+   missing switches. `cron.ts` refuses to start if a `REPORT_ENABLED_*` or
+   `REPORT_RECIPIENTS_*` name doesn't match any report (the error lists the valid names),
+   or if an enabled report has no recipients. Adding a new report to the registry means
+   adding its `REPORT_ENABLED_*` line to every deployment's `deno.env`.
 
    `SCHOOL_TIMEZONE` is the school's IANA timezone name, e.g. `Australia/Melbourne` or
    `Australia/Perth` (not an abbreviation like `AEST`, which has no daylight saving). It
@@ -156,9 +192,11 @@ Currently registered:
 | `explained-absences`                                       | whole school        | explained   |
 | `unexplained-absences`                                     | whole school        | unexplained |
 
-To add a report: drop a new file in `reports/`, register it in `reports/registry.ts`.
-Nothing else needs to change — `attendance-data.ts` derives every report's rows from the
-same underlying dataset.
+To add a report: drop a new file in `reports/`, register it in `reports/registry.ts`. No
+other code needs to change — `attendance-data.ts` derives every report's rows from the
+same underlying dataset. Then add its `REPORT_ENABLED_<REPORT_ID>` (and, when `true`,
+`REPORT_RECIPIENTS_<REPORT_ID>`) to every deployment's `deno.env`. The switch is required,
+so `check-env` and `cron.ts` fail until it's there.
 
 ### Term-by-term status-group breakdown
 
@@ -168,7 +206,8 @@ teaching minutes in each status group (Present, the curated `STATUS_GROUPS` in
 trends. It isn't a per-student roster, so it doesn't use the `ReportDefinition`/registry
 machinery: it has its own pipeline (`status-group-report.ts`,
 `email-templates/status-group-email-template.ts`, `send-status-group-report.ts`) and its
-own schedule entry, `statusGroupReport`, in `config/cron-config.ts`.
+own variables, `REPORT_ENABLED_STATUS_GROUP_BREAKDOWN` and
+`REPORT_RECIPIENTS_STATUS_GROUP_BREAKDOWN`. It shows one column per configured term.
 
 ## Scheduling
 
@@ -198,9 +237,9 @@ Settings:
   instead of its real recipients. Useful for testing the whole pipeline without
   coordinators receiving anything. The sync summary/failure email is unaffected by this
   flag — it always goes to `mail-config.ts`'s `syncSummaryRecipients`.
-- `reports` — one entry per report id, with an `enabled` switch and its real `recipients`
-  list.
-- `statusGroupReport` — `enabled` switch and `recipients` for the status-group breakdown.
+- `reports` / `statusGroupReport` — built from `deno.env`'s `REPORT_ENABLED_*` and
+  `REPORT_RECIPIENTS_*` variables (see [Setup](#setup)). `cron.ts` logs the scheduled
+  reports at startup.
 
 **Why a 5-minute tick instead of a normal cron expression:** `Deno.cron` schedules are
 UTC-only with no timezone parameter. Baking the school's UTC offset into a fixed cron
@@ -231,7 +270,8 @@ automatically at the start of each run, so `logs/` doesn't grow unbounded.
 
 ## Configuration files
 
-- `config/config.ts` — term/semester/year date ranges for the current school year.
+- `config/config.ts` — reads and validates the term dates (`TERM_n`) from `deno.env` and
+  derives the year's date range.
 - `config/mail-config.ts` — reads and validates the SMTP settings (`MAIL_*`) and
   `SYNC_SUMMARY_RECIPIENTS` (who gets the sync run summary/failure email) from `deno.env`.
 - `config/cron-config.ts` — see [Scheduling](#scheduling) above.
