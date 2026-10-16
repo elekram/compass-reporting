@@ -3,7 +3,8 @@
 Pulls student attendance data from the [Compass Education](https://www.compass.education/)
 API for Cheltenham Secondary College into Postgres, and generates/emails
 attendance-anomaly reports (e.g. "students below 85% explained attendance") to year level
-coordinators — either on demand or on an unattended daily schedule.
+coordinators — either on demand or on an unattended daily schedule. It also sends a
+principal-facing term-by-term attendance breakdown (whole school and per year level).
 
 ## How it fits together
 
@@ -14,7 +15,7 @@ Compass API  →  sync.ts        →  Postgres (period_lines, statuses, students
                             attendance-data.ts (shaping/filtering/trends)
                                         │
                                         ▼
-                        email-templates/email-template.ts (HTML)
+     email-templates/email-template.ts / status-group-email-template.ts (HTML)
                                         │
                                         ▼
                                   mailer.ts (SMTP)
@@ -58,11 +59,19 @@ reachable at _sync_ time, not at _send_ time.
    SYNC_SUMMARY_RECIPIENTS=you@example.com
    CRON_DEBUG_MODE=false
    CRON_DEBUG_RECIPIENTS=you@example.com
+   DISCREPANCY_ESCALATION_THRESHOLD=<rows>
    ```
 
    `CRON_DEBUG_MODE` must be exactly `true` or `false` — `cron.ts` throws on startup for
    anything else (including unset) rather than defaulting, so a misconfigured copy can't
    silently fall through to emailing real coordinators. Set it to `true` on any dev clone.
+
+   `DISCREPANCY_ESCALATION_THRESHOLD` is a non-negative integer: the smallest positive
+   DB-vs-Compass row gap the weekly evening check will act on with a full-year resync (see
+   [Scheduling](#scheduling)). Smaller gaps are just reported, never resynced.
+
+   Every entry point imports `check-env.ts` first, which throws listing **every** missing
+   variable at once. `deno task check-env` runs that check on its own.
 
 2. `docker compose up -d` — brings up Postgres (schema created from
    `init/postgres-init.sh` on first boot only) and the `web` container running `cron.ts`.
@@ -74,14 +83,17 @@ reachable at _sync_ time, not at _send_ time.
 
 All tasks run via `docker compose run --rm web deno task <name> [-- args]`.
 
-| Task            | Command                                           | Purpose                                                                                                                                                   |
-| --------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync`          | `deno task sync`                                  | One-shot sync: statuses, student roster, and period lines from Compass into Postgres. Emails a run summary/failure alert (see `config/mail-config.ts`).   |
-| `report`        | `deno task report`                                | Writes a CSV + console table per registered report — no email.                                                                                            |
-| `email-preview` | `deno task email-preview -- [report-id]`          | Renders one report's email to `email-templates/preview-<id>.html` for viewing in a browser, without sending anything.                                     |
-| `send-report`   | `deno task send-report -- <report-id> [email...]` | Sends one report by id. Extra args override its configured recipients — handy for testing against yourself.                                               |
-| `cron`          | `deno task cron`                                  | Registers the daily scheduled job and keeps running (this is what the `web` container runs continuously).                                                 |
-| `query`         | `deno task query -- <name> [args...]`             | Ad-hoc CLI for pulling raw data straight from a Compass endpoint (bypasses Postgres entirely) — see `compass-query.ts` for the list of available queries. |
+| Task                       | Command                                            | Purpose                                                                                                                                                                        |
+| -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sync`                     | `deno task sync`                                   | One-shot sync: statuses, student roster, and period lines from Compass into Postgres. Emails a run summary/failure alert (see `config/mail-config.ts`).                        |
+| `report`                   | `deno task report`                                 | Writes a CSV + console table per registered report — no email.                                                                                                                 |
+| `email-preview`            | `deno task email-preview -- [report-id]`           | Renders one report's email to `email-templates/preview-<id>.html` for viewing in a browser, without sending anything.                                                          |
+| `send-report`              | `deno task send-report -- <report-id> [email...]`  | Sends one report by id. Extra args override its configured recipients — handy for testing against yourself.                                                                    |
+| `send-status-group-report` | `deno task send-status-group-report -- <email...>` | Sends the term-by-term status-group breakdown to the given addresses. Pass `--preview` instead to write `email-templates/preview-status-group-breakdown.html` without sending. |
+| `evening-check`            | `deno task evening-check`                          | Runs the evening discrepancy check once (trailing resync, row-count check, full-year resync only if the gap exceeds the threshold).                                            |
+| `check-env`                | `deno task check-env`                              | Checks `deno.env` has every required variable, without running anything else.                                                                                                  |
+| `cron`                     | `deno task cron`                                   | Registers the scheduled jobs and keeps running (this is what the `web` container runs continuously).                                                                           |
+| `query`                    | `deno task query -- <name> [args...]`              | Ad-hoc CLI for pulling raw data straight from a Compass endpoint (bypasses Postgres entirely) — see `compass-query.ts` for the list of available queries.                      |
 
 ## Reports
 
@@ -112,14 +124,38 @@ To add a report: drop a new file in `reports/`, register it in `reports/registry
 Nothing else needs to change — `attendance-data.ts` derives every report's rows from the
 same underlying dataset.
 
+### Term-by-term status-group breakdown
+
+A principal-facing report showing, for the whole school and each year level, the % of
+teaching minutes in each status group (Present, the curated `STATUS_GROUPS` in
+`api/compass-api.helpers.ts`, and Other) per term and year to date, with term-on-term
+trends. It isn't a per-student roster, so it doesn't use the `ReportDefinition`/registry
+machinery: it has its own pipeline (`status-group-report.ts`,
+`email-templates/status-group-email-template.ts`, `send-status-group-report.ts`) and its
+own schedule entry, `statusGroupReport`, in `config/cron-config.ts`.
+
 ## Scheduling
 
-`cron.ts` registers one [`Deno.cron`](https://docs.deno.com/runtime/fundamentals/cron/)
-job that runs the sync and then sends every enabled report, controlled by
-`config/cron-config.ts`:
+`cron.ts` registers two [`Deno.cron`](https://docs.deno.com/runtime/fundamentals/cron/)
+jobs, controlled by `config/cron-config.ts`:
 
-- `runTimeLocal` — Melbourne local time (`"HH:MM"`, must land on a 5-minute mark) the job
-  fires.
+- **Daily job** (weekdays only) — runs the sync, then sends every enabled report, then the
+  status-group breakdown. Report sends are skipped if the sync fails. The status-group
+  report is wrapped in its own error handling so a failure there can't affect the
+  per-student reports.
+- **Evening discrepancy check** (weekly) — runs the 14-day trailing resync, then compares
+  the DB's year-to-date `period_lines` count against Compass's own total. If the gap
+  exceeds `DISCREPANCY_ESCALATION_THRESHOLD` it runs a full-year forced resync (can take
+  hours). Silent when there's no gap; emails the sync summary recipients otherwise.
+
+Settings:
+
+- `runTimeLocal` — Melbourne local time (`"HH:MM"`, must land on a 5-minute mark) the
+  daily job fires.
+- `eveningCheckTimeLocal` / `eveningCheckDayLocal` — when the evening check fires (e.g.
+  `21:00` on `Fri`). Weekly rather than nightly because a full-year resync the night
+  before a report run previously caused an out-of-memory crash; Friday leaves the weekend
+  to recover.
 - `debugMode` / `debugRecipients` — read from `deno.env`'s `CRON_DEBUG_MODE` and
   `CRON_DEBUG_RECIPIENTS`, not committed to this file, since they differ per deployment.
   While `debugMode` is `true`, every report email is redirected to `debugRecipients`
@@ -128,6 +164,7 @@ job that runs the sync and then sends every enabled report, controlled by
   flag — it always goes to `mail-config.ts`'s `syncSummaryRecipients`.
 - `reports` — one entry per report id, with an `enabled` switch and its real `recipients`
   list.
+- `statusGroupReport` — `enabled` switch and `recipients` for the status-group breakdown.
 
 **Why a 5-minute tick instead of a normal cron expression:** `Deno.cron` schedules are
 UTC-only with no timezone parameter. Baking Melbourne's UTC offset into a fixed cron
@@ -149,12 +186,12 @@ Two things worth knowing about `Deno.cron` in general:
 timestamped file under `logs/` (gitignored, created on first run). Both `sync.ts`'s own
 CLI entry point and `cron.ts`'s daily job wrap themselves in a run — `sync.ts` produces
 `logs/sync-<timestamp>.log`, `cron.ts` produces `logs/cron-daily-<timestamp>.log` covering
-the sync **and** every report send that follows it in the same file. Every Compass API
-response (including each page of the paginated period-lines fetch, with a running
-`fetched X/Y (Z%)` progress indicator) is logged as it happens, not just at the end of a
-run. The sync summary/failure email also includes the log file's path for that run. Files
-older than 30 days are pruned automatically at the start of each run, so `logs/` doesn't
-grow unbounded.
+the sync **and** every report send that follows it in the same file, and the evening check
+produces `logs/cron-evening-check-<timestamp>.log`. Every Compass API response (including
+each page of the paginated period-lines fetch, with a running `fetched X/Y (Z%)` progress
+indicator) is logged as it happens, not just at the end of a run. The sync summary/failure
+email also includes the log file's path for that run. Files older than 30 days are pruned
+automatically at the start of each run, so `logs/` doesn't grow unbounded.
 
 ## Configuration files
 
@@ -162,6 +199,7 @@ grow unbounded.
 - `config/mail-config.ts` — SMTP settings and `syncSummaryRecipients` (who gets the sync
   run summary/failure email).
 - `config/cron-config.ts` — see [Scheduling](#scheduling) above.
+- `check-env.ts` — the list of required `deno.env` variables.
 
 ## Database
 
