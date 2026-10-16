@@ -13,7 +13,8 @@
 // Presence only, plus the one cross-key requirement below — the actual
 // value validation for each variable (e.g. CRON_DEBUG_MODE must be exactly
 // "true"/"false", DISCREPANCY_ESCALATION_THRESHOLD must be a non-negative
-// integer, MAIL_PORT must be a valid port) stays with the module that owns it (config/cron-config.ts,
+// integer, MAIL_USERNAME/MAIL_PASSWORD are optional but must be set
+// together) stays with the module that owns it (config/cron-config.ts,
 // config/mail-config.ts, sync.ts, db.ts, api/compass-api.ts) rather than
 // being duplicated here, so there's one place that decides what "valid"
 // means for each variable, not two that can drift apart.
@@ -22,9 +23,8 @@ const requiredEnvVars = [
   'COMPASS_API_KEY',
   'MAIL_HOST',
   'MAIL_PORT',
-  'MAIL_SECURE',
-  'MAIL_NO_REPLY_USERNAME',
-  'MAIL_NO_REPLY_PASSWORD',
+  'MAIL_SECURITY',
+  'MAIL_FROM',
   'SYNC_SUMMARY_RECIPIENTS',
   'CRON_DEBUG_MODE',
   'DISCREPANCY_ESCALATION_THRESHOLD',

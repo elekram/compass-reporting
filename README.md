@@ -57,19 +57,29 @@ reachable at _sync_ time, not at _send_ time.
    DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
    MAIL_HOST=smtp.gmail.com
    MAIL_PORT=465
-   MAIL_SECURE=true
-   MAIL_NO_REPLY_USERNAME=noreply@example.com
-   MAIL_NO_REPLY_PASSWORD=<smtp app password>
+   MAIL_SECURITY=tls
+   MAIL_FROM=noreply@example.com
+   MAIL_USERNAME=noreply@example.com
+   MAIL_PASSWORD=<smtp app password>
    SYNC_SUMMARY_RECIPIENTS=you@example.com
    CRON_DEBUG_MODE=false
    CRON_DEBUG_RECIPIENTS=you@example.com
    DISCREPANCY_ESCALATION_THRESHOLD=<rows>
    ```
 
-   The `MAIL_*` variables are the SMTP account every email is sent from.
-   `MAIL_NO_REPLY_USERNAME` is both the login and the From address. `MAIL_SECURE` must be
-   exactly `true` (implicit TLS, usually port 465) or `false`. Prefer implicit TLS where
-   your provider offers it: denomailer's STARTTLS handling on port 587 has a known bug.
+   The `MAIL_*` variables are the SMTP server every email is sent through:
+
+   - `MAIL_SECURITY` must be exactly one of:
+     - `tls`: encrypted from the start, usually port 465. Prefer this where your provider
+       offers it, because denomailer's STARTTLS handling on port 587 has a known bug.
+     - `starttls`: connects unencrypted, then upgrades. Usually port 587 or 25. Fails if
+       the server doesn't offer STARTTLS.
+     - `none`: no encryption required, e.g. an internal relay on port 25. STARTTLS is
+       still used if the server offers it.
+   - `MAIL_FROM` is the From address on every email.
+   - `MAIL_USERNAME` / `MAIL_PASSWORD` are optional. Leave both out (or empty) for a
+     server that accepts mail without a login. Set one and you must set the other. A login
+     can't be combined with `MAIL_SECURITY=none`, so it's never sent unencrypted.
 
    `CRON_DEBUG_MODE` must be exactly `true` or `false` — `cron.ts` throws on startup for
    anything else (including unset) rather than defaulting, so a misconfigured copy can't

@@ -79,21 +79,23 @@ export async function sendMail(
       // constructed inside the capture too — with debug.log on, denomailer's
       // constructor console.tables the resolved config, SMTP password and all,
       // before a single byte goes over the wire.
+      //
+      // see mail-config.ts's MailSecurity for the three modes. With tls: false
+      // denomailer always upgrades via STARTTLS when the server offers it, and
+      // refuses to continue unencrypted unless allowUnsecure is set — so
+      // "starttls" and "none" differ only in that flag.
       client = new SMTPClient({
-        debug: { log: true },
+        debug: { log: true, allowUnsecure: mailConfig.security === 'none' },
         connection: {
           hostname: mailConfig.host,
           port: mailConfig.port,
-          tls: mailConfig.secure,
-          auth: {
-            username: mailConfig.noReplyUserName,
-            password: mailConfig.noReplyAccPassword,
-          },
+          tls: mailConfig.security === 'tls',
+          auth: mailConfig.auth ?? undefined,
         },
       })
 
       await client.send({
-        from: mailConfig.noReplyUserName,
+        from: mailConfig.from,
         to,
         subject,
         mimeContent: [
