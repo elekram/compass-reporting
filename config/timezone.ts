@@ -28,3 +28,13 @@ if (!schoolTimezone.includes('/') && schoolTimezone !== 'UTC') {
 }
 
 export const SCHOOL_TIMEZONE = schoolTimezone
+
+// the school-local calendar date (YYYY-MM-DD) at a given instant. Not
+// date.toISOString()'s UTC date: for a school east of UTC, the morning run
+// happens on the *previous* UTC day (07:30 in Melbourne is 20:30 or 21:30 UTC
+// the day before), which made the first school day of every term look like
+// a holiday. The 'en-CA' locale is only there because it formats as
+// YYYY-MM-DD.
+export function schoolDateIso(date: Date = new Date()): string {
+  return date.toLocaleDateString('en-CA', { timeZone: SCHOOL_TIMEZONE })
+}

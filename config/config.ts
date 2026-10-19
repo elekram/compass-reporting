@@ -1,3 +1,5 @@
+import { schoolDateIso } from './timezone.ts'
+
 export interface Period {
   name: string
   start: string
@@ -88,12 +90,23 @@ const year: Period = {
   end: terms[terms.length - 1].end,
 }
 
+// the term the given instant falls in, judged by the school-local date (see
+// schoolDateIso), or null during the holidays — between terms, or before the
+// first/after the last. cron.ts uses the null to skip reports in the holidays.
+function findCurrentTerm(date: Date = new Date()): Period | null {
+  const isoDate = schoolDateIso(date)
+  return terms.find((t) => isoDate >= t.start && isoDate <= t.end) ?? null
+}
+
+// findCurrentTerm for the manual report scripts (send-report.ts et al.),
+// which have no sensible fallback during the holidays and should say so.
 function getCurrentTerm(date: Date = new Date()): Period {
-  const isoDate = date.toISOString().substring(0, 10)
-  const term = terms.find((t) => isoDate >= t.start && isoDate <= t.end)
+  const term = findCurrentTerm(date)
 
   if (!term) {
-    throw new Error(`No configured term covers ${isoDate}`)
+    throw new Error(
+      `No configured term covers ${schoolDateIso(date)} (school holidays?)`,
+    )
   }
 
   return term
@@ -102,6 +115,7 @@ function getCurrentTerm(date: Date = new Date()): Period {
 const config = {
   terms,
   year,
+  findCurrentTerm,
   getCurrentTerm,
 }
 

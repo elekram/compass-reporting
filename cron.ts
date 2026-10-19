@@ -1,7 +1,7 @@
 import './check-env.ts'
-import config from './config/config.ts'
+import config, { Period } from './config/config.ts'
 import cronConfig from './config/cron-config.ts'
-import { SCHOOL_TIMEZONE } from './config/timezone.ts'
+import { SCHOOL_TIMEZONE, schoolDateIso } from './config/timezone.ts'
 import { STATUS_GROUP_REPORT_ID } from './config/report-env-keys.ts'
 import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'
 import {
@@ -49,10 +49,10 @@ function isSchoolWeekday(): boolean {
 // sends every enabled report in cronConfig.reports, sequentially, against
 // one shared year/term dataset fetch — mirrors send-report.ts's per-report
 // flow but loops instead of taking a single report id from argv.
-async function sendScheduledReports() {
+async function sendScheduledReports(currentTerm: Period) {
   const [yearDataset, termDataset] = await Promise.all([
     getStudentAttendance(config.year),
-    getStudentAttendance(config.getCurrentTerm()),
+    getStudentAttendance(currentTerm),
   ])
 
   const enabledReports = cronConfig.reports.filter((entry) => entry.enabled)
@@ -123,8 +123,32 @@ async function runDailyJob() {
       return
     }
 
-    log('cron.ts: sync ok, sending scheduled reports')
-    await sendScheduledReports()
+    // reports are only wanted during term — attendance doesn't move in the
+    // holidays, so there's nothing new to send. The sync above still runs
+    // every weekday regardless, so late roll changes keep getting picked up.
+    // Judged by the school-local date (see config.ts's findCurrentTerm), so
+    // the first school day of a term counts as term time.
+    const currentTerm = config.findCurrentTerm()
+    if (!currentTerm) {
+      log(
+        `cron.ts: sync ok — school holidays (no term covers ${schoolDateIso()}), skipping report sends`,
+      )
+      log('cron.ts: daily job complete')
+      return
+    }
+
+    log(`cron.ts: sync ok, sending scheduled reports for ${currentTerm.name}`)
+
+    // caught and logged here rather than left to escape: an uncaught error
+    // only reaches `docker compose logs` (not this run's log file), and
+    // Deno.cron's automatic retries of a failed handler are no-ops anyway
+    // once the clock has moved past runTimeLocal. Not allowed to stop the
+    // status-group report below either — the two are independent.
+    try {
+      await sendScheduledReports(currentTerm)
+    } catch (error) {
+      logError('cron.ts: scheduled reports failed', error)
+    }
 
     try {
       await sendStatusGroupReport()

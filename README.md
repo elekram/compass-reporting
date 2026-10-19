@@ -296,9 +296,13 @@ own variables, `REPORT_ENABLED_STATUS_GROUP_BREAKDOWN` and
 jobs, controlled by `config/cron-config.ts`:
 
 - **Daily job** (weekdays only) — runs the sync, then sends every enabled report, then the
-  status-group breakdown. Report sends are skipped if the sync fails. The status-group
-  report is wrapped in its own error handling so a failure there can't affect the
-  per-student reports.
+  status-group breakdown. Report sends are skipped if the sync fails. The per-student
+  reports and the status-group report each have their own error handling, so a failure in
+  one can't stop the other, and the error lands in that run's log file.
+  - **School holidays:** the sync still runs every weekday, so late roll changes keep
+    being picked up, but no reports are sent. A day counts as a holiday when no `TERM_n`
+    covers it, judged by the date in `SCHOOL_TIMEZONE`, so the first day of a term is
+    treated as term time. The log says `school holidays … skipping report sends`.
 - **Evening discrepancy check** (weekly) — runs the 14-day trailing resync, then compares
   the DB's year-to-date `period_lines` count against Compass's own total. If the gap
   exceeds `DISCREPANCY_ESCALATION_THRESHOLD` it runs a full-year forced resync (can take
