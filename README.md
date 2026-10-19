@@ -1,10 +1,10 @@
 # compass-reporting
 
 Pulls student attendance data from the [Compass Education](https://www.compass.education/)
-API for Cheltenham Secondary College into Postgres, and generates/emails
-attendance-anomaly reports (e.g. "students below 85% explained attendance") to year level
-coordinators — either on demand or on an unattended daily schedule. It also sends a
-principal-facing term-by-term attendance breakdown (whole school and per year level).
+API for the configured school into Postgres, and generates/emails attendance-anomaly
+reports (e.g. "students below 85% explained attendance") to year level coordinators —
+either on demand or on an unattended daily schedule. It also sends a principal-facing
+term-by-term attendance breakdown (whole school and per year level).
 
 ## How it fits together
 
@@ -39,117 +39,166 @@ reachable at _sync_ time, not at _send_ time.
 
 ## Setup
 
-1. Create two gitignored env files in the project root:
+1. Create two gitignored env files in the project root, `.env` and `deno.env`, using the
+   variables listed in [Environment variables](#environment-variables) below. Then check
+   them:
 
-   **`.env`** (read by `docker-compose.yaml`):
    ```
-   TZ=Australia/Melbourne
-   HOST_UID=1000
-   HOST_GID=1000
-   PG_PORT=5434
-   PG_USER=postgres
-   PG_PASSWORD=<postgres password>
+   docker compose run --rm --no-deps web deno task check-env
    ```
 
-   **`deno.env`** (read by the app inside the container, via `--env-file`):
-   ```
-   TZ=Australia/Melbourne
-   SCHOOL_TIMEZONE=Australia/Melbourne
-   COMPASS_SCHOOL_URL=yourschool.compass.education
-   SCHOOL_LOGO_URL=https://www.yourschool.edu.au/logo.png
-   COMPASS_API_KEY=<compass api key>
-   DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
-   MAIL_HOST=smtp.gmail.com
-   MAIL_PORT=465
-   MAIL_SECURITY=tls
-   MAIL_FROM=noreply@example.com
-   MAIL_USERNAME=noreply@example.com
-   MAIL_PASSWORD=<smtp app password>
-   SYNC_SUMMARY_RECIPIENTS=you@example.com
-   CRON_DEBUG_MODE=false
-   CRON_DEBUG_RECIPIENTS=you@example.com
-   DISCREPANCY_ESCALATION_THRESHOLD=<rows>
-   TERM_1=2026-01-27,2026-04-02
-   TERM_2=2026-04-20,2026-06-26
-   TERM_3=2026-07-13,2026-09-18
-   TERM_4=2026-10-05,2026-12-18
-   REPORT_ENABLED_UNEXPLAINED_ABSENCES=false
-   REPORT_ENABLED_EXPLAINED_ABSENCES=false
-   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_7=true
-   REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_7=coordinator@example.com,principal@example.com
-   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_8=false
-   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_9=false
-   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_10=false
-   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_11=false
-   REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_12=false
-   REPORT_ENABLED_STATUS_GROUP_BREAKDOWN=true
-   REPORT_RECIPIENTS_STATUS_GROUP_BREAKDOWN=principal@example.com
-   ```
+   Every entry point also runs this check first, so a missing variable stops the app at
+   startup and the error lists **every** missing variable at once. Set
+   `CRON_DEBUG_MODE=true` on any dev copy.
 
-   `TERM_1`, `TERM_2`, … are the current school year's terms, each `<start>,<end>` as
-   `YYYY-MM-DD` (both days included). They're read in order until the first missing
-   number, so a school with three or four terms just sets three or four. Each term must
-   start after the previous one ends. The year runs from the first term's start to the
-   last term's end. Update them at the start of each school year.
+2. `docker compose up -d`: brings up Postgres and the `web` container running `cron.ts`.
+   The schema is created from `init/postgres-init.sh` on Postgres's first boot only.
 
-   Each report has two variables, named after its id upper-cased with `-` turned into `_`
-   (e.g. `explained-absences-year-7` becomes `..._EXPLAINED_ABSENCES_YEAR_7`). The
-   term-by-term breakdown uses `..._STATUS_GROUP_BREAKDOWN`.
-   - `REPORT_ENABLED_<REPORT_ID>` is **required for every report** and must be exactly
-     `true` or `false`. It decides whether the report goes out on the daily schedule.
-   - `REPORT_RECIPIENTS_<REPORT_ID>` is the comma-separated list of who receives it. It's
-     only required while the report is enabled, so you can switch a report off and back on
-     without touching its recipients.
+3. The first sync is a full backfill from the start of `TERM_1` and takes several hours
+   (about 640,000 period lines took roughly 5 hours, at around 2,000 rows a minute). Every
+   sync after that is incremental. It can be run by hand with
+   `docker compose run --rm web deno task sync`, and if it's interrupted it resumes where
+   it stopped. See [Scheduling](#scheduling).
 
-   A disabled report can still be sent by hand with `send-report`. `check-env` lists any
-   missing switches. `cron.ts` refuses to start if a `REPORT_ENABLED_*` or
-   `REPORT_RECIPIENTS_*` name doesn't match any report (the error lists the valid names),
-   or if an enabled report has no recipients. Adding a new report to the registry means
-   adding its `REPORT_ENABLED_*` line to every deployment's `deno.env`.
+## Environment variables
 
-   `SCHOOL_TIMEZONE` is the school's IANA timezone name, e.g. `Australia/Melbourne` or
-   `Australia/Perth` (not an abbreviation like `AEST`, which has no daylight saving). It
-   decides the school's local day and wall-clock time everywhere: when the cron jobs fire,
-   the sync window, and how period lines are grouped into school days.
+### `.env`
 
-   `SCHOOL_LOGO_URL` is optional: the logo shown top-right in every report email. It must
-   be a public http(s) image URL, since email clients fetch it when the message is opened.
-   It's shown 154px wide, with the height following the image. Leave it out for no logo.
+Read by `docker-compose.yaml` only.
 
-   `COMPASS_SCHOOL_URL` is the host you log in to Compass at, e.g.
-   `yourschool.compass.education`. A full URL like `https://yourschool.compass.education/`
-   also works; anything with a path after the host is rejected.
+| Variable      | Required | Example               | Purpose                                                                         |
+| ------------- | -------- | --------------------- | ------------------------------------------------------------------------------- |
+| `HOST_UID`    | yes      | `1000`                | User id the `web` container runs as, so files it writes (logs, CSVs) are yours. |
+| `HOST_GID`    | yes      | `1000`                | Group id for the same.                                                          |
+| `PG_PORT`     | yes      | `5434`                | Host port Postgres is published on (inside Docker it's always 5432).            |
+| `PG_USER`     | yes      | `postgres`            | Postgres superuser name.                                                        |
+| `PG_PASSWORD` | yes      | `<postgres password>` | Postgres superuser password. Must match the one in `DB_URL`.                    |
+| `TZ`          | no       | `Australia/Melbourne` | Not used. Harmless to keep.                                                     |
 
-   The `MAIL_*` variables are the SMTP server every email is sent through:
+### `deno.env`
 
-   - `MAIL_SECURITY` must be exactly one of:
-     - `tls`: encrypted from the start, usually port 465. Prefer this where your provider
-       offers it, because denomailer's STARTTLS handling on port 587 has a known bug.
-     - `starttls`: connects unencrypted, then upgrades. Usually port 587 or 25. Fails if
-       the server doesn't offer STARTTLS.
-     - `none`: no encryption required, e.g. an internal relay on port 25. STARTTLS is
-       still used if the server offers it.
-   - `MAIL_FROM` is the From address on every email.
-   - `MAIL_USERNAME` / `MAIL_PASSWORD` are optional. Leave both out (or empty) for a
-     server that accepts mail without a login. Set one and you must set the other. A login
-     can't be combined with `MAIL_SECURITY=none`, so it's never sent unencrypted.
+Read by the app inside the container, via `--env-file`. "Required" means `check-env` or
+the app refuses to start without it.
 
-   `CRON_DEBUG_MODE` must be exactly `true` or `false` — `cron.ts` throws on startup for
-   anything else (including unset) rather than defaulting, so a misconfigured copy can't
-   silently fall through to emailing real coordinators. Set it to `true` on any dev clone.
+**School**
 
-   `DISCREPANCY_ESCALATION_THRESHOLD` is a non-negative integer: the smallest positive
-   DB-vs-Compass row gap the weekly evening check will act on with a full-year resync (see
-   [Scheduling](#scheduling)). Smaller gaps are just reported, never resynced.
+| Variable              | Required | Example                                  | Purpose                                                                                                                                                                                                                          |
+| --------------------- | -------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COMPASS_SCHOOL_URL`  | yes      | `yourschool.compass.education`           | The host you log in to Compass at. A full URL like `https://yourschool.compass.education/` also works. Anything with a path after the host is rejected.                                                                          |
+| `COMPASS_API_KEY`     | yes      | `<compass api key>`                      | Compass API key.                                                                                                                                                                                                                 |
+| `SCHOOL_TIMEZONE`     | yes      | `Australia/Melbourne`                    | IANA timezone name (not an abbreviation like `AEST`, which has no daylight saving). Decides the school's local day and time everywhere: when cron jobs fire, the sync window, and how period lines are grouped into school days. |
+| `SCHOOL_LOGO_URL`     | no       | `https://www.yourschool.edu.au/logo.png` | Logo shown top-right in every report email. Must be a public http(s) image URL, because email clients fetch it when the email is opened. Shown 154px wide, height follows the image. No logo if unset.                           |
+| `TERM_1`, `TERM_2`, … | `TERM_1` | `2026-01-27,2026-04-02`                  | The school year's terms, each `<start>,<end>` as `YYYY-MM-DD`, both days included. See [Term dates](#term-dates).                                                                                                                |
+| `TZ`                  | no       | `Australia/Melbourne`                    | Not needed: the app uses `SCHOOL_TIMEZONE` for everything school-related. Harmless to keep.                                                                                                                                      |
 
-   Every entry point imports `check-env.ts` first, which throws listing **every** missing
-   variable at once. `deno task check-env` runs that check on its own.
+**Database**
 
-2. `docker compose up -d` — brings up Postgres (schema created from
-   `init/postgres-init.sh` on first boot only) and the `web` container running `cron.ts`.
+| Variable | Required | Example                                                        | Purpose                                                                           |
+| -------- | -------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `DB_URL` | yes      | `postgres://postgres:<postgres password>@postgres:5432/docker` | Connection string. User and password must match `.env`'s `PG_USER`/`PG_PASSWORD`. |
 
-3. The first sync is a full historical backfill (from `config.year.start`) and can take a
-   while; every sync after that is incremental. See [Scheduling](#scheduling).
+**Email**
+
+| Variable                  | Required             | Example               | Purpose                                                                                                         |
+| ------------------------- | -------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `MAIL_HOST`               | yes                  | `smtp.gmail.com`      | SMTP server every email is sent through.                                                                        |
+| `MAIL_PORT`               | yes                  | `465`                 | SMTP port.                                                                                                      |
+| `MAIL_SECURITY`           | yes                  | `tls`                 | Exactly `tls`, `starttls` or `none`. See [Mail security](#mail-security).                                       |
+| `MAIL_FROM`               | yes                  | `noreply@example.com` | From address on every email.                                                                                    |
+| `MAIL_USERNAME`           | no                   | `noreply@example.com` | SMTP login. Leave out for a server that accepts mail without one.                                               |
+| `MAIL_PASSWORD`           | with `MAIL_USERNAME` | `<smtp app password>` | SMTP password. Set both login variables or neither. A login can't be combined with `MAIL_SECURITY=none`.        |
+| `SYNC_SUMMARY_RECIPIENTS` | yes                  | `you@example.com`     | Comma-separated. Who gets the sync summary/failure and evening-check emails. Not affected by `CRON_DEBUG_MODE`. |
+
+**Schedule and reports**
+
+| Variable                           | Required                    | Example                                         | Purpose                                                                                                                                                                                                     |
+| ---------------------------------- | --------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CRON_DEBUG_MODE`                  | yes                         | `false`                                         | Exactly `true` or `false`. While `true`, every report email goes to `CRON_DEBUG_RECIPIENTS` instead of its real recipients. Required, not defaulted, so a misconfigured copy can't email real coordinators. |
+| `CRON_DEBUG_RECIPIENTS`            | when `CRON_DEBUG_MODE=true` | `you@example.com`                               | Comma-separated. Where report emails go in debug mode.                                                                                                                                                      |
+| `DISCREPANCY_ESCALATION_THRESHOLD` | yes                         | `500`                                           | Non-negative integer. The smallest positive DB-vs-Compass row gap the weekly evening check will fix with a full-year resync. Smaller gaps are just reported. See [Scheduling](#scheduling).                 |
+| `REPORT_ENABLED_<REPORT_ID>`       | yes, one per report         | `true`                                          | Exactly `true` or `false`: whether that report goes out on the daily schedule. See [Report variables](#report-variables).                                                                                   |
+| `REPORT_RECIPIENTS_<REPORT_ID>`    | when that report is enabled | `coordinator@example.com,principal@example.com` | Comma-separated. Who receives that report on the daily schedule.                                                                                                                                            |
+
+#### Term dates
+
+`TERM_1`, `TERM_2`, … are read in order until the first missing number, so a school with
+three or four terms just sets three or four. Each term must start after the previous one
+ends, and the numbers can't have gaps (a `TERM_3` with no `TERM_2` is an error). The year
+runs from the first term's start to the last term's end. Update them at the start of each
+school year.
+
+#### Mail security
+
+- `tls`: encrypted from the start, usually port 465. Prefer this where your provider
+  offers it, because denomailer's STARTTLS handling on port 587 has a known bug.
+- `starttls`: connects unencrypted, then upgrades. Usually port 587 or 25. Fails if the
+  server doesn't offer STARTTLS.
+- `none`: no encryption required, e.g. an internal relay on port 25. STARTTLS is still
+  used if the server offers it.
+
+#### Report variables
+
+Each report's variables are named after its id upper-cased, with `-` turned into `_`. The
+term-by-term breakdown has its own fixed id, `status-group-breakdown`. With the current
+reports, that means these variables:
+
+| Report                       | Switch (always required)                    | Recipients (required when the switch is `true`) |
+| ---------------------------- | ------------------------------------------- | ----------------------------------------------- |
+| `unexplained-absences`       | `REPORT_ENABLED_UNEXPLAINED_ABSENCES`       | `REPORT_RECIPIENTS_UNEXPLAINED_ABSENCES`        |
+| `explained-absences`         | `REPORT_ENABLED_EXPLAINED_ABSENCES`         | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES`          |
+| `explained-absences-year-7`  | `REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_7`  | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_7`   |
+| `explained-absences-year-8`  | `REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_8`  | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_8`   |
+| `explained-absences-year-9`  | `REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_9`  | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_9`   |
+| `explained-absences-year-10` | `REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_10` | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_10`  |
+| `explained-absences-year-11` | `REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_11` | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_11`  |
+| `explained-absences-year-12` | `REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_12` | `REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_12`  |
+| `status-group-breakdown`     | `REPORT_ENABLED_STATUS_GROUP_BREAKDOWN`     | `REPORT_RECIPIENTS_STATUS_GROUP_BREAKDOWN`      |
+
+Keeping the switch separate from the recipients means you can turn a report off and back
+on without touching its addresses. A disabled report can still be sent by hand with
+`send-report`. `cron.ts` refuses to start if a `REPORT_ENABLED_*` or `REPORT_RECIPIENTS_*`
+name doesn't match any report (the error lists the valid names), or if an enabled report
+has no recipients. Adding a new report to the registry means adding its `REPORT_ENABLED_*`
+line to every deployment's `deno.env`.
+
+### Example `deno.env`
+
+```
+COMPASS_SCHOOL_URL=yourschool.compass.education
+COMPASS_API_KEY=<compass api key>
+SCHOOL_TIMEZONE=Australia/Melbourne
+SCHOOL_LOGO_URL=https://www.yourschool.edu.au/logo.png
+TERM_1=2026-01-27,2026-04-02
+TERM_2=2026-04-20,2026-06-26
+TERM_3=2026-07-13,2026-09-18
+TERM_4=2026-10-05,2026-12-18
+
+DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
+
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=465
+MAIL_SECURITY=tls
+MAIL_FROM=noreply@example.com
+MAIL_USERNAME=noreply@example.com
+MAIL_PASSWORD=<smtp app password>
+SYNC_SUMMARY_RECIPIENTS=you@example.com
+
+CRON_DEBUG_MODE=true
+CRON_DEBUG_RECIPIENTS=you@example.com
+DISCREPANCY_ESCALATION_THRESHOLD=500
+
+REPORT_ENABLED_UNEXPLAINED_ABSENCES=false
+REPORT_ENABLED_EXPLAINED_ABSENCES=false
+REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_7=true
+REPORT_RECIPIENTS_EXPLAINED_ABSENCES_YEAR_7=coordinator@example.com,principal@example.com
+REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_8=false
+REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_9=false
+REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_10=false
+REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_11=false
+REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_12=false
+REPORT_ENABLED_STATUS_GROUP_BREAKDOWN=true
+REPORT_RECIPIENTS_STATUS_GROUP_BREAKDOWN=principal@example.com
+```
 
 ## Tasks
 
@@ -238,8 +287,8 @@ Settings:
   coordinators receiving anything. The sync summary/failure email is unaffected by this
   flag — it always goes to `mail-config.ts`'s `syncSummaryRecipients`.
 - `reports` / `statusGroupReport` — built from `deno.env`'s `REPORT_ENABLED_*` and
-  `REPORT_RECIPIENTS_*` variables (see [Setup](#setup)). `cron.ts` logs the scheduled
-  reports at startup.
+  `REPORT_RECIPIENTS_*` variables (see [Report variables](#report-variables)). `cron.ts`
+  logs the scheduled reports at startup.
 
 **Why a 5-minute tick instead of a normal cron expression:** `Deno.cron` schedules are
 UTC-only with no timezone parameter. Baking the school's UTC offset into a fixed cron
@@ -274,8 +323,15 @@ automatically at the start of each run, so `logs/` doesn't grow unbounded.
   derives the year's date range.
 - `config/mail-config.ts` — reads and validates the SMTP settings (`MAIL_*`) and
   `SYNC_SUMMARY_RECIPIENTS` (who gets the sync run summary/failure email) from `deno.env`.
-- `config/cron-config.ts` — see [Scheduling](#scheduling) above.
+- `config/cron-config.ts` — schedule times, debug mode, and the per-report switches and
+  recipients from `deno.env`. See [Scheduling](#scheduling) above.
+- `config/report-env-keys.ts` — the `REPORT_ENABLED_*` / `REPORT_RECIPIENTS_*` variable
+  names for each report.
+- `config/timezone.ts` — reads and validates `SCHOOL_TIMEZONE`.
+- `config/logo.ts` — reads and validates `SCHOOL_LOGO_URL`.
 - `check-env.ts` — the list of required `deno.env` variables.
+
+Every variable is described in [Environment variables](#environment-variables).
 
 ## Database
 
