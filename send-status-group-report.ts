@@ -9,17 +9,17 @@ import { sendMail } from './mailer.ts'
 // comment for why its data shape doesn't fit that machinery.
 //
 // Usage:
-//   deno task send-status-group-report -- <recipient-email...>
-//   deno task send-status-group-report -- --preview
+//   ./run.sh send-status-group-report <recipient-email...>
+//   ./run.sh send-status-group-report --preview
 const args = Deno.args.filter((arg) => arg !== '--')
 const preview = args.includes('--preview')
 const to = args.filter((arg) => arg.includes('@'))
 
 if (!preview && to.length === 0) {
   console.error(
-    'Usage: deno task send-status-group-report -- <recipient-email...>',
+    'Usage: ./run.sh send-status-group-report <recipient-email...>',
   )
-  console.error('       deno task send-status-group-report -- --preview')
+  console.error('       ./run.sh send-status-group-report --preview')
   await sql.end()
   Deno.exit(1)
 }

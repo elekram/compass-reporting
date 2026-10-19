@@ -6,6 +6,55 @@ reports (e.g. "students below 85% explained attendance") to year level coordinat
 either on demand or on an unattended daily schedule. It also sends a principal-facing
 term-by-term attendance breakdown (whole school and per year level).
 
+## Running tasks
+
+Every task runs inside the `web` container. `./run.sh` is the short way to run one:
+
+```
+./run.sh <task> [args...]
+```
+
+It's the same as `docker compose run --rm web deno task <task> [args...]`, except that it
+skips starting Postgres for the tasks that don't need it, and it refuses to start a second
+copy of the scheduler. `./run.sh` on its own lists every task.
+
+### Quick checks
+
+Confirm a deployment is configured correctly, without waiting for the schedule or needing
+any attendance data:
+
+```
+./run.sh check-env                  # are all required deno.env variables present?
+./run.sh test-mail you@example.com  # can it send email?
+```
+
+`test-mail` prints the settings it's using (never the password), then the mail server's
+response: an acceptance line such as `250 2.0.0 OK …` and `test-mail.ts: OK` on success,
+or the server's error and `test-mail.ts: FAILED` otherwise. With no address it sends to
+`SYNC_SUMMARY_RECIPIENTS`. It only needs the `MAIL_*` variables and
+`SYNC_SUMMARY_RECIPIENTS`, so it works before the rest of `deno.env` is filled in.
+
+### All tasks
+
+| Command                                        | Needs Postgres | Purpose                                                                                                                                                                       |
+| ---------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./run.sh check-env`                           | no             | Checks `deno.env` has every required variable, without running anything else.                                                                                                 |
+| `./run.sh test-mail [email...]`                | no             | Sends a short test email with the `MAIL_*` settings, to the given addresses or `SYNC_SUMMARY_RECIPIENTS`.                                                                     |
+| `./run.sh query <name> [args...]`              | no             | Pulls raw data straight from a Compass endpoint, bypassing Postgres. `./run.sh query` lists the available queries.                                                            |
+| `./run.sh sync`                                | yes            | Syncs statuses, the student roster and period lines from Compass into Postgres now, then emails a run summary or failure alert to `SYNC_SUMMARY_RECIPIENTS`.                  |
+| `./run.sh evening-check`                       | yes            | Runs the evening discrepancy check once: trailing resync, row-count check, and a full-year resync only if the gap exceeds `DISCREPANCY_ESCALATION_THRESHOLD`.                 |
+| `./run.sh report`                              | yes            | Writes a CSV and a console table per registered report. No email.                                                                                                             |
+| `./run.sh email-preview [report-id]`           | yes            | Renders one report's email to `email-templates/preview-<id>.html` for viewing in a browser, without sending anything.                                                         |
+| `./run.sh send-report <report-id> [email...]`  | yes            | Sends one report by id. With addresses, it goes only to them, which is handy for testing against yourself.                                                                    |
+| `./run.sh send-status-group-report <email...>` | yes            | Sends the term-by-term breakdown to the given addresses. Use `--preview` instead of addresses to write `email-templates/preview-status-group-breakdown.html` without sending. |
+
+`sync` and `send-*` act for real: `sync` emails the summary recipients, and the `send-*`
+tasks email whoever you name. `CRON_DEBUG_MODE` only redirects the scheduled sends.
+
+The scheduler itself (`deno task cron`) is what the `web` container runs continuously.
+Start it with `docker compose up -d` and watch it with `docker compose logs -f web`;
+`./run.sh cron` refuses to start a second copy, which would run every job twice.
+
 ## How it fits together
 
 ```
@@ -44,7 +93,7 @@ reachable at _sync_ time, not at _send_ time.
    them:
 
    ```
-   docker compose run --rm --no-deps web deno task check-env
+   ./run.sh check-env
    ```
 
    Every entry point also runs this check first, so a missing variable stops the app at
@@ -56,9 +105,8 @@ reachable at _sync_ time, not at _send_ time.
 
 3. The first sync is a full backfill from the start of `TERM_1` and takes several hours
    (about 640,000 period lines took roughly 5 hours, at around 2,000 rows a minute). Every
-   sync after that is incremental. It can be run by hand with
-   `docker compose run --rm web deno task sync`, and if it's interrupted it resumes where
-   it stopped. See [Scheduling](#scheduling).
+   sync after that is incremental. It can be run by hand with `./run.sh sync`, and if it's
+   interrupted it resumes where it stopped. See [Scheduling](#scheduling).
 
 ## Environment variables
 
@@ -199,22 +247,6 @@ REPORT_ENABLED_EXPLAINED_ABSENCES_YEAR_12=false
 REPORT_ENABLED_STATUS_GROUP_BREAKDOWN=true
 REPORT_RECIPIENTS_STATUS_GROUP_BREAKDOWN=principal@example.com
 ```
-
-## Tasks
-
-All tasks run via `docker compose run --rm web deno task <name> [-- args]`.
-
-| Task                       | Command                                            | Purpose                                                                                                                                                                        |
-| -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sync`                     | `deno task sync`                                   | One-shot sync: statuses, student roster, and period lines from Compass into Postgres. Emails a run summary/failure alert (see `config/mail-config.ts`).                        |
-| `report`                   | `deno task report`                                 | Writes a CSV + console table per registered report — no email.                                                                                                                 |
-| `email-preview`            | `deno task email-preview -- [report-id]`           | Renders one report's email to `email-templates/preview-<id>.html` for viewing in a browser, without sending anything.                                                          |
-| `send-report`              | `deno task send-report -- <report-id> [email...]`  | Sends one report by id. Extra args override its configured recipients — handy for testing against yourself.                                                                    |
-| `send-status-group-report` | `deno task send-status-group-report -- <email...>` | Sends the term-by-term status-group breakdown to the given addresses. Pass `--preview` instead to write `email-templates/preview-status-group-breakdown.html` without sending. |
-| `evening-check`            | `deno task evening-check`                          | Runs the evening discrepancy check once (trailing resync, row-count check, full-year resync only if the gap exceeds the threshold).                                            |
-| `check-env`                | `deno task check-env`                              | Checks `deno.env` has every required variable, without running anything else.                                                                                                  |
-| `cron`                     | `deno task cron`                                   | Registers the scheduled jobs and keeps running (this is what the `web` container runs continuously).                                                                           |
-| `query`                    | `deno task query -- <name> [args...]`              | Ad-hoc CLI for pulling raw data straight from a Compass endpoint (bypasses Postgres entirely) — see `compass-query.ts` for the list of available queries.                      |
 
 ## Reports
 

@@ -15,7 +15,7 @@ const cliRecipients = args.filter((arg) => arg.includes('@'))
 const reportId = args.find((arg) => !arg.includes('@'))
 
 if (!reportId) {
-  console.error('Usage: deno task send-report -- <report-id> [recipient-email...]')
+  console.error('Usage: ./run.sh send-report <report-id> [recipient-email...]')
   console.error(`Available reports: ${reports.map((r) => r.id).join(', ')}`)
   await sql.end()
   Deno.exit(1)

@@ -36,7 +36,7 @@ const QUERIES: Record<string, Query> = {
 const [name, ...rest] = Deno.args.filter((arg) => arg !== '--')
 
 if (!name || !(name in QUERIES)) {
-  console.error('Usage: deno task query -- <query> [args...]')
+  console.error('Usage: ./run.sh query <query> [args...]')
   console.error(`Available queries: ${Object.keys(QUERIES).join(', ')}`)
   Deno.exit(1)
 }
