@@ -397,3 +397,7 @@ deno check    # type-check
 
 Run both inside the container to match the pinned Deno version:
 `docker compose run --rm web deno fmt` / `deno check <files>`.
+
+## License
+
+[MIT](LICENSE)
