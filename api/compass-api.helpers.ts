@@ -5,6 +5,7 @@ import {
   StudentAttendancePercentage,
   StudentRosterEntry,
 } from './compass-api.types.ts'
+import { schoolDateIso } from '../config/timezone.ts'
 
 // joins the three Compass endpoints into one flat row per period attendance
 // line: student identity via compassPersonId (originally a live
@@ -132,9 +133,14 @@ export function calculateAttendancePercentages(
       )
       .reduce((sum, line) => sum + line.expectedMinutes, 0)
 
+    // grouped by the school-local date, not the UTC date in `start` (Compass
+    // sends UTC, e.g. "2026-02-23T22:40:00Z" for period 2 on Tue 24 Feb in
+    // Melbourne). Taking the UTC date used to split every school day in two —
+    // periods before ~10/11am local landed on the previous date — inflating
+    // both Any Days and Full Days.
     const linesByDate = new Map<string, AssembledAttendancePeriodLine[]>()
     for (const line of studentLines) {
-      const date = line.start.substring(0, 10)
+      const date = schoolDateIso(new Date(line.start))
       if (!linesByDate.has(date)) {
         linesByDate.set(date, [])
       }
