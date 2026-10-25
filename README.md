@@ -384,9 +384,8 @@ running container (`docker compose exec postgres psql -U postgres -d docker`).
 
 ## Reference data
 
-`csv/` and `models/` hold historical CSV exports and sample raw API response shapes
-gathered while reverse-engineering the Compass endpoints. Not read by any script — kept
-for reference only.
+`models/` holds sample raw Compass API responses gathered while reverse-engineering the
+endpoints. Not read by any script — kept for reference only.
 
 ## Development
 
@@ -400,4 +399,4 @@ Run both inside the container to match the pinned Deno version:
 
 ## License
 
-[MIT](LICENSE)
+[GPL-3.0](LICENSE)
