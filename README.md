@@ -303,6 +303,10 @@ jobs, controlled by `config/cron-config.ts`:
     being picked up, but no reports are sent. A day counts as a holiday when no `TERM_n`
     covers it, judged by the date in `SCHOOL_TIMEZONE`, so the first day of a term is
     treated as term time. The log says `school holidays … skipping report sends`.
+  - **Reports cover complete days only:** every figure (year, term, trends, daily
+    breakdown) runs up to and including **yesterday**, in `SCHOOL_TIMEZONE`. Today's
+    periods already exist in Compass, unmarked, at 07:30. So a report run later in the day
+    by hand gives the same figures as the scheduled one.
 - **Evening discrepancy check** (weekly) — runs the 14-day trailing resync, then compares
   the DB's year-to-date `period_lines` count against Compass's own total. If the gap
   exceeds `DISCREPANCY_ESCALATION_THRESHOLD` it runs a full-year forced resync (can take

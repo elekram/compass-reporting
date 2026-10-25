@@ -1,4 +1,4 @@
-import { schoolDateIso } from './timezone.ts'
+import { isValidDateIso, schoolDateIso } from './timezone.ts'
 
 export interface Period {
   name: string
@@ -14,15 +14,8 @@ export interface Period {
 // typo'd date fails at startup instead of silently shifting every report's
 // date range: real calendar dates, start <= end, and each term starting
 // after the previous one ends.
-const TERM_DATE = /^\d{4}-\d{2}-\d{2}$/
-
 function parseTermDate(key: string, value: string): string {
-  const date = new Date(`${value}T00:00:00Z`)
-  // the round-trip catches dates that parse but roll over, e.g. 2026-02-30.
-  if (
-    !TERM_DATE.test(value) || Number.isNaN(date.getTime()) ||
-    date.toISOString().substring(0, 10) !== value
-  ) {
+  if (!isValidDateIso(value)) {
     throw new Error(
       `${key} has an invalid date "${value}" in deno.env (expected YYYY-MM-DD)`,
     )

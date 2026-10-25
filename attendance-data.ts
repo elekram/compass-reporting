@@ -16,7 +16,12 @@ import {
   StudentRosterEntry,
 } from './api/compass-api.types.ts'
 import { Period } from './config/config.ts'
-import { SCHOOL_TIMEZONE } from './config/timezone.ts'
+import {
+  addDaysIso,
+  lastCompleteSchoolDateIso,
+  SCHOOL_TIMEZONE,
+  weekdayOfDateIso,
+} from './config/timezone.ts'
 import { AbsenceCategory, ReportDefinition } from './reports/types.ts'
 
 // trend windows are always relative to today, independent of whatever
@@ -228,11 +233,24 @@ function toPeriodAttendanceLine(row: PeriodLineRow): PeriodAttendanceLine {
   }
 }
 
-// startIso inclusive, endExclusiveIso exclusive (so callers pass the day
-// after the last day they want included).
+// a period line's school-local date, as an SQL expression — every query that
+// filters or groups period_lines by day goes through this, so "which day is
+// this line on" is decided the same way everywhere (see config/timezone.ts).
+// `start` is a timestamptz (a UTC instant): comparing it to a plain
+// 'YYYY-MM-DD' instead would read the date as UTC midnight — 10/11am in
+// Melbourne — and shift every range by those hours (this used to drop
+// periods 1-2 of a range's first day and pull in periods 1-2 of the day
+// after its last).
+function startSchoolDate() {
+  return sql`(start AT TIME ZONE ${SCHOOL_TIMEZONE})::date`
+}
+
+// period lines whose school date falls within startIso..endIso, both
+// inclusive. Empty when endIso < startIso (e.g. a term's first morning,
+// before any of its days are complete).
 async function queryPeriodLines(
   startIso: string,
-  endExclusiveIso: string,
+  endIso: string,
 ): Promise<PeriodAttendanceLine[]> {
   const rows: PeriodLineRow[] = await sql`
     SELECT period_line_id, compass_person_id, campus_guid, description,
@@ -240,9 +258,16 @@ async function queryPeriodLines(
            prevalent_overall_status_id, standard_class_shadow, teaching_time,
            updated_timestamp
     FROM period_lines
-    WHERE start >= ${startIso} AND start < ${endExclusiveIso}
+    WHERE ${startSchoolDate()} BETWEEN ${startIso} AND ${endIso}
   `
   return rows.map(toPeriodAttendanceLine)
+}
+
+// a reporting period capped at the last complete school day — reports never
+// count today (see lastCompleteSchoolDateIso) or days that haven't happened.
+function completedPeriodEnd(period: Period): string {
+  const lastComplete = lastCompleteSchoolDateIso()
+  return lastComplete < period.end ? lastComplete : period.end
 }
 
 // the 6 numbered teaching periods a school day is built from — excludes
@@ -258,44 +283,30 @@ const TEACHING_PERIOD_CODES = ['1', '2', '3', '4', '5', '6']
 // above a partially-synced one.
 const MIN_STUDENTS_FOR_COMPLETE_DAY = 300
 
-// SCHOOL_TIMEZONE (config/timezone.ts) — `start` is stored as timestamptz (UTC
-// instants), but e.g. Melbourne is UTC+10/+11, so morning periods (period 1
-// at 08:50 local) land on the *previous* UTC calendar date. Grouping/filtering
-// by a raw `start::date` (as this used to) splits a single local school day
-// across two UTC dates — Postgres's `AT TIME ZONE` handles the DST-aware
-// conversion correctly, so all local-day logic goes through it rather than
-// JS Date arithmetic.
-
 // most recent complete days first (descending) — the daily breakdown
-// table renders them in this order, most recent day on top.
+// table renders them in this order, most recent day on top. "Complete" =
+// on or before the last complete school day (the app's clock, via
+// lastCompleteSchoolDateIso, rather than the database's now()) and with
+// enough students marked. Days come back as 'YYYY-MM-DD' text straight from
+// SQL, so no Date conversion is needed to read them.
 async function findMostRecentCompleteDays(count: number): Promise<string[]> {
-  const rows: { day: Date }[] = await sql`
-    SELECT (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date AS day
+  const rows: { day: string }[] = await sql`
+    SELECT ${startSchoolDate()}::text AS day
     FROM period_lines
-    WHERE (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date < (now() AT TIME ZONE ${SCHOOL_TIMEZONE})::date
+    WHERE ${startSchoolDate()} <= ${lastCompleteSchoolDateIso()}
     GROUP BY day
     HAVING COUNT(DISTINCT compass_person_id) >= ${MIN_STUDENTS_FOR_COMPLETE_DAY}
     ORDER BY day DESC
     LIMIT ${count}
   `
-  return rows.map((row) => row.day.toISOString().substring(0, 10))
+  return rows.map((row) => row.day)
 }
 
-// fetches every period line whose local (SCHOOL_TIMEZONE) calendar date
-// matches dateIso — see the SCHOOL_TIMEZONE comment for why this can't just
-// be a UTC start/end range like queryPeriodLines.
+// fetches every period line on one school date (see startSchoolDate).
 async function queryPeriodLinesForLocalDay(
   dateIso: string,
 ): Promise<PeriodAttendanceLine[]> {
-  const rows: PeriodLineRow[] = await sql`
-    SELECT period_line_id, compass_person_id, campus_guid, description,
-           expected_minutes, start, finish, period_code,
-           prevalent_overall_status_id, standard_class_shadow, teaching_time,
-           updated_timestamp
-    FROM period_lines
-    WHERE (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date = ${dateIso}
-  `
-  return rows.map(toPeriodAttendanceLine)
+  return await queryPeriodLines(dateIso, dateIso)
 }
 
 function classifyDailyCode(code: string | null): DailyCellKind {
@@ -317,7 +328,7 @@ const DAILY_BREAKDOWN_DAYS = 3
 
 interface AwayStreakLineRow {
   compass_person_id: string
-  day: Date
+  day: string
   period_code: string
   prevalent_overall_status_id: string
 }
@@ -354,19 +365,18 @@ async function computeAwayStreaks(
 
   const rangeStart = walkDays[walkDays.length - 1]
   const rows: AwayStreakLineRow[] = await sql`
-    SELECT compass_person_id, (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date AS day,
+    SELECT compass_person_id, ${startSchoolDate()}::text AS day,
            period_code, prevalent_overall_status_id
     FROM period_lines
     WHERE compass_person_id = ANY(${candidateIds})
       AND teaching_time = true
       AND period_code = ANY(${TEACHING_PERIOD_CODES})
-      AND (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date >= ${rangeStart}
-      AND (start AT TIME ZONE ${SCHOOL_TIMEZONE})::date <= ${mostRecentDay}
+      AND ${startSchoolDate()} BETWEEN ${rangeStart} AND ${mostRecentDay}
   `
 
   const codesByKey = new Map<string, Map<string, string | null>>()
   for (const row of rows) {
-    const dayIso = row.day.toISOString().substring(0, 10)
+    const dayIso = row.day
     const key = `${row.compass_person_id}|${dayIso}`
     if (!codesByKey.has(key)) {
       codesByKey.set(key, new Map())
@@ -530,18 +540,6 @@ export async function getDailyPeriodBreakdown(
   return results.filter((result) => result.rows.length > 0)
 }
 
-function isoDateDaysAgo(days: number): string {
-  const d = new Date()
-  d.setUTCDate(d.getUTCDate() - days)
-  return d.toISOString().substring(0, 10)
-}
-
-function addDaysIso(dateIso: string, days: number): string {
-  const d = new Date(`${dateIso}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().substring(0, 10)
-}
-
 function trendDelta(current: number | null, previous: number | null): number | null {
   if (current === null || previous === null) {
     return null
@@ -554,22 +552,23 @@ interface TrendPair {
   explainedTrend: number | null
 }
 
-// compares the last TREND_WINDOW_DAYS days against the TREND_WINDOW_DAYS
-// before that, per student, for both absence categories. Two separate
-// queries (rather than one query split in JS) keeps the date-boundary
-// logic in SQL instead of relying on string/Date comparisons matching
-// exactly.
+// compares the last TREND_WINDOW_DAYS calendar days (ending on the last
+// complete school day) against the TREND_WINDOW_DAYS before that, per
+// student, for both absence categories. Both windows are inclusive school
+// date ranges of exactly TREND_WINDOW_DAYS days, back to back with no
+// overlap.
 async function getTrends(
   statuses: AttendanceStatus[],
   students: StudentRosterEntry[],
 ): Promise<Map<string, TrendPair>> {
-  const todayExclusive = addDaysIso(isoDateDaysAgo(0), 1)
-  const currentStart = isoDateDaysAgo(TREND_WINDOW_DAYS)
-  const previousStart = isoDateDaysAgo(TREND_WINDOW_DAYS * 2)
+  const currentEnd = lastCompleteSchoolDateIso()
+  const currentStart = addDaysIso(currentEnd, -(TREND_WINDOW_DAYS - 1))
+  const previousEnd = addDaysIso(currentStart, -1)
+  const previousStart = addDaysIso(previousEnd, -(TREND_WINDOW_DAYS - 1))
 
   const [currentLines, previousLines] = await Promise.all([
-    queryPeriodLines(currentStart, todayExclusive),
-    queryPeriodLines(previousStart, currentStart),
+    queryPeriodLines(currentStart, currentEnd),
+    queryPeriodLines(previousStart, previousEnd),
   ])
 
   const currentPct = calculateAttendancePercentages(
@@ -626,10 +625,9 @@ function toStudentAttendance(
 // (category/year level/threshold), is derived from this same dataset via
 // buildReportData rather than re-querying period_lines per report.
 export async function getStudentAttendance(period: Period): Promise<AttendanceDataset> {
-  const today = new Date().toISOString().substring(0, 10)
-  // term may still be in progress — don't project attendance across days
-  // that haven't happened yet, so cap the upper bound at today.
-  const end = today < period.end ? today : period.end
+  // term may still be in progress — only count school days that are fully
+  // over (see completedPeriodEnd).
+  const end = completedPeriodEnd(period)
 
   const [statusRows, students] = await Promise.all([
     sql<StatusRow[]>`SELECT * FROM statuses`,
@@ -637,7 +635,7 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
   ])
   const statuses = statusRows.map(toAttendanceStatus)
 
-  const periodLines = await queryPeriodLines(period.start, addDaysIso(end, 1))
+  const periodLines = await queryPeriodLines(period.start, end)
   const assembled = assembleAttendanceReport(periodLines, statuses, students)
   const percentages = calculateAttendancePercentages(assembled)
   const trends = await getTrends(statuses, students)
@@ -752,13 +750,7 @@ export function buildSubjectLine(
     return `[Absences] ${yearLabel}`
   }
   const [y, m, d] = mostRecentDay.date.split('-')
-  const weekday = new Date(`${mostRecentDay.date}T00:00:00Z`).toLocaleDateString(
-    'en-US',
-    {
-      weekday: 'short',
-      timeZone: 'UTC',
-    },
-  )
+  const weekday = weekdayOfDateIso(mostRecentDay.date, 'short')
   return `[Absences] ${yearLabel} ${weekday} ${d}/${m}/${y}`
 }
 
@@ -873,8 +865,7 @@ function sortYearLevelKeys(keys: string[]): string[] {
 export async function getStatusGroupBreakdown(
   period: Period,
 ): Promise<StatusGroupPeriodBreakdown> {
-  const today = new Date().toISOString().substring(0, 10)
-  const end = today < period.end ? today : period.end
+  const end = completedPeriodEnd(period)
 
   const [statusRows, students] = await Promise.all([
     sql<StatusRow[]>`SELECT * FROM statuses`,
@@ -882,7 +873,7 @@ export async function getStatusGroupBreakdown(
   ])
   const statuses = statusRows.map(toAttendanceStatus)
 
-  const periodLines = await queryPeriodLines(period.start, addDaysIso(end, 1))
+  const periodLines = await queryPeriodLines(period.start, end)
   const assembled = assembleAttendanceReport(periodLines, statuses, students)
   // unmatched students (no roster join — see the ~97% match rate caveat on
   // personGetStudentsBasic) are dropped here, same as getStudentAttendance

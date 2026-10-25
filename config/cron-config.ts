@@ -156,7 +156,7 @@ const cronConfig = {
   // overnight to finish. Must also land on a 5-minute mark.
   eveningCheckTimeLocal: '21:00',
 
-  // which school-local weekday (cron.ts's currentSchoolWeekday format —
+  // which school-local weekday (config/timezone.ts's schoolWeekdayShort format —
   // "Mon"/"Tue"/etc) the evening check fires on. Weekly rather than nightly:
   // the full-term resync it can trigger processes 10x the rows the old daily
   // trailing-resync-only baseline did, and running it every weeknight left

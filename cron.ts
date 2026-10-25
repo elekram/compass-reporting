@@ -1,7 +1,12 @@
 import './check-env.ts'
 import config, { Period } from './config/config.ts'
 import cronConfig from './config/cron-config.ts'
-import { SCHOOL_TIMEZONE, schoolDateIso } from './config/timezone.ts'
+import {
+  SCHOOL_TIMEZONE,
+  schoolDateIso,
+  schoolTimeHHMM,
+  schoolWeekdayShort,
+} from './config/timezone.ts'
 import { STATUS_GROUP_REPORT_ID } from './config/report-env-keys.ts'
 import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'
 import {
@@ -16,33 +21,11 @@ import statusGroupEmailTemplate from './email-templates/status-group-email-templ
 import { sendMail } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
-// "HH:MM" in school-local time (SCHOOL_TIMEZONE), DST-aware via Intl (unlike a
-// fixed UTC cron expression, this doesn't need manual adjustment at a
-// daylight-saving changeover — see cronConfig.runTimeLocal). The 'en-AU'
-// locale only fixes the output format ("07:30", "Mon"), whatever the zone.
-function currentSchoolTime(): string {
-  return new Date().toLocaleTimeString('en-AU', {
-    timeZone: SCHOOL_TIMEZONE,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
-// "Mon"/"Tue"/etc in school-local time — shared by the weekday gate below
-// and the evening check's single-weekday gate (cronConfig.eveningCheckDayLocal).
-function currentSchoolWeekday(): string {
-  return new Date().toLocaleDateString('en-AU', {
-    timeZone: SCHOOL_TIMEZONE,
-    weekday: 'short',
-  })
-}
-
 // school days only — Compass itself doesn't move on weekends, so a
 // Saturday/Sunday run would just re-sync an unchanged window and send
 // reports with nothing new to say.
 function isSchoolWeekday(): boolean {
-  const day = currentSchoolWeekday()
+  const day = schoolWeekdayShort()
   return day !== 'Sat' && day !== 'Sun'
 }
 
@@ -170,7 +153,7 @@ async function runDailyJob() {
 // non-overlapping executions of the same job on its own, so there's no risk
 // of two ticks racing each other.
 Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
-  if (currentSchoolTime() !== cronConfig.runTimeLocal) {
+  if (schoolTimeHHMM() !== cronConfig.runTimeLocal) {
     return
   }
   if (!isSchoolWeekday()) {
@@ -187,10 +170,10 @@ Deno.cron('daily-sync-and-reports', '*/5 * * * *', async () => {
 // else in this tick to share a log file with). Fires weekly, not nightly —
 // see cronConfig.eveningCheckDayLocal for why.
 Deno.cron('evening-discrepancy-check', '*/5 * * * *', async () => {
-  if (currentSchoolTime() !== cronConfig.eveningCheckTimeLocal) {
+  if (schoolTimeHHMM() !== cronConfig.eveningCheckTimeLocal) {
     return
   }
-  if (currentSchoolWeekday() !== cronConfig.eveningCheckDayLocal) {
+  if (schoolWeekdayShort() !== cronConfig.eveningCheckDayLocal) {
     return
   }
   await runEveningCheckAndEmail()

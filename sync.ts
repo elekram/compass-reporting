@@ -13,7 +13,7 @@ import {
 } from './api/compass-api.types.ts'
 import config from './config/config.ts'
 import mailConfig from './config/mail-config.ts'
-import { SCHOOL_TIMEZONE } from './config/timezone.ts'
+import { addDaysIso, schoolDateIso } from './config/timezone.ts'
 import { sendMail as sendMailRaw } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
@@ -58,26 +58,36 @@ if (
   )
 }
 
-// the API's uBound is sent as `${end}T00:00:00Z` — an *instant*, not a local
-// calendar date (see attendanceGetPeriodLinesBetweenBounds) — so for a
-// Melbourne school an `end` of "2026-08-10" actually closes the window at
-// 10am/11am local on the 10th, not at local midnight. This used to be handed
-// new Date().toISOString()'s UTC date, which made it worse: the 07:30
-// Melbourne job runs at 21:30 UTC the *previous* day, so `end` resolved to the
-// previous UTC date and the window shut at 10am on the very day being
-// reported — periods 3-6 were never fetched and rendered as "Unscheduled" in
-// the daily breakdown. Taking today's school-local date and adding a day puts
-// the boundary at UTC midnight tomorrow — past the end of today's last period
-// for any school east of roughly UTC-6, which covers every region Compass
-// operates in.
+// the API's lBound/uBound are sent as `${date}T00:00:00Z` — *instants*, not
+// school dates (see attendanceGetPeriodLinesBetweenBounds) — so for a
+// Melbourne school a bound of "2026-08-10" is 10am/11am local on the 10th,
+// not local midnight. Both edges of every fetch window are therefore padded
+// by a day, so the window always covers whole school days:
+//
+// syncWindowEnd: today's school date + 1, i.e. UTC midnight tomorrow — past
+// the end of today's last period for any school east of roughly UTC-6, which
+// covers every region Compass operates in. (This used to be
+// new Date().toISOString()'s UTC date: the 07:30 Melbourne job runs at 21:30
+// UTC the *previous* day, so the window shut at 10am on the very day being
+// reported — periods 3-6 were never fetched and rendered as "Unscheduled".)
 function syncWindowEnd(): string {
-  const schoolToday = new Date().toLocaleDateString('en-CA', {
-    timeZone: SCHOOL_TIMEZONE,
-  })
-  const end = new Date(`${schoolToday}T00:00:00Z`)
-  end.setUTCDate(end.getUTCDate() + 1)
-  return end.toISOString().substring(0, 10)
+  return addDaysIso(schoolDateIso(), 1)
 }
+
+// windowStart: the school date before the first one wanted, for the same
+// reason — `${firstSchoolDate}T00:00:00Z` alone is 10/11am local on that day,
+// which used to leave periods 1-2 of the year's first day (and of each
+// trailing resync's first day) permanently unfetched. Fetching an extra
+// earlier day is harmless: upserts are idempotent and every report filters
+// by school date anyway.
+function windowStart(firstSchoolDate: string): string {
+  return addDaysIso(firstSchoolDate, -1)
+}
+
+// the year-to-date fetch window's start, shared by the incremental sync, the
+// evening check's full-year resync, and its row count (which must use the
+// exact same bounds as the Compass total it's compared against).
+const YEAR_WINDOW_START = windowStart(config.year.start)
 
 // sync_state is only ever written after a run fully completes (see bottom of
 // this file), so reading it back is always safe — unlike computing
@@ -259,13 +269,15 @@ interface DiscrepancyCheck {
 // the window having moved rather than anything left unsynced.
 async function checkPeriodLineDiscrepancy(windowEnd: string): Promise<DiscrepancyCheck> {
   const apiTotal = await attendanceGetPeriodLinesTotal(
-    config.year.start,
+    YEAR_WINDOW_START,
     windowEnd,
     FIRST_SYNC_TIMESTAMP,
   )
+  // deliberately the API's own UTC-instant bounds, not school dates: this
+  // count has to cover exactly the rows Compass counted above.
   const [{ count }] = await sql<[{ count: string }]>`
     SELECT count(*)::text FROM period_lines
-    WHERE start >= ${`${config.year.start}T00:00:00Z`}
+    WHERE start >= ${`${YEAR_WINDOW_START}T00:00:00Z`}
       AND start < ${`${windowEnd}T00:00:00Z`}
   `
   const dbCount = Number(count)
@@ -300,9 +312,9 @@ let currentStage = 'starting up'
 // sync) and runEveningCheckAndEmail (as a cheap self-heal pass before
 // deciding whether the far more expensive full-term resync is warranted).
 async function runTrailingResync(windowEnd: string): Promise<number> {
-  const trailingStart = new Date()
-  trailingStart.setUTCDate(trailingStart.getUTCDate() - TRAILING_RESYNC_DAYS)
-  const trailingStartIso = trailingStart.toISOString().substring(0, 10)
+  const trailingStartIso = windowStart(
+    addDaysIso(schoolDateIso(), -TRAILING_RESYNC_DAYS),
+  )
 
   log(
     `sync.ts: running trailing resync for ${trailingStartIso} to ${windowEnd} (self-heals rows a sync may have silently dropped)`,
@@ -375,7 +387,7 @@ async function runSync(): Promise<SyncSummary> {
   let syncedCount = 0
 
   await attendanceGetPeriodLinesBetweenBounds(
-    config.year.start,
+    YEAR_WINDOW_START,
     windowEnd,
     modifiedSinceTimestamp,
     async (page) => {
@@ -630,7 +642,7 @@ export async function runEveningCheckAndEmail(): Promise<{ ok: boolean }> {
         currentStage = 'running full-term forced resync (evening discrepancy remediation)'
         let resyncedCount = 0
         await attendanceGetPeriodLinesBetweenBounds(
-          config.year.start,
+          YEAR_WINDOW_START,
           windowEnd,
           FIRST_SYNC_TIMESTAMP,
           async (page) => {

@@ -8,6 +8,7 @@ import {
   PeriodMetrics,
 } from '../attendance-data.ts'
 import { renderLogo } from './logo.ts'
+import { weekdayOfDateIso } from '../config/timezone.ts'
 
 function escapeHtml(value: string): string {
   return value
@@ -276,16 +277,6 @@ function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
   }).join('')
 }
 
-// daily.date is a plain calendar date (no time component) — parsing it as
-// UTC midnight and formatting with timeZone: 'UTC' keeps the weekday tied to
-// that date regardless of the server's own local timezone.
-function weekdayName(dateIso: string): string {
-  return new Date(`${dateIso}T00:00:00Z`).toLocaleDateString('en-US', {
-    weekday: 'long',
-    timeZone: 'UTC',
-  })
-}
-
 function renderDailyDayTable(daily: DailyBreakdownData): string {
   const periodHeaders = daily.rows[0].cells.map((_, i) => `
                   <td style='padding: 6px 4px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 12px; font-weight: bold; color: #283747; text-align: center;'>P${
@@ -296,7 +287,7 @@ function renderDailyDayTable(daily: DailyBreakdownData): string {
           <tr>
             <td class='innerpadding'
               style='padding: 12px 0px 4px 0px; font-family: sans-serif; font-size: 15px; font-weight: bold; color: #283747;'>
-              Period Breakdown - ${escapeHtml(weekdayName(daily.date))} ${
+              Period Breakdown - ${escapeHtml(weekdayOfDateIso(daily.date))} ${
     formatDateDdMmYyyySlash(daily.date)
   } - ${daily.rows.length} Students
             </td>
