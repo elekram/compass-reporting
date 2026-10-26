@@ -7,16 +7,8 @@ import {
   DailyPeriodCell,
   PeriodMetrics,
 } from '../attendance-data.ts'
-import { renderLogo } from './logo.ts'
+import { escapeHtml, renderEmailShell } from './html.ts'
 import { weekdayOfDateIso } from '../config/timezone.ts'
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-}
 
 // dateIso is a plain YYYY-MM-DD calendar date, so this is a straight
 // string reshuffle rather than a Date parse — avoids any timezone drift.
@@ -417,194 +409,9 @@ function renderAbsenceBody(rows: AbsenceRow[], threshold: number): string {
 }
 
 export default function emailTemplate(data: AttendanceReportData): string {
-  return `
-  <!DOCTYPE html
-  PUBLIC '-//W3C//DTD XHTML 1.0 Transitional//EN' 'http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd'>
-  <html xmlns='http://www.w3.org/1999/xhtml'>
-
-<head>
-  <meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
-  <title>CSC</title>
-  <style type='text/css'>
-    body {
-      margin: 0;
-      padding: 0;
-      min-width: 100% !important;
-    }
-
-    img {
-      height: auto;
-    }
-
-    .content {
-      width: 100%;
-      max-width: 600px;
-    }
-
-    .header {
-      padding: 40px 30px 20px 30px;
-    }
-
-    .innerpadding {
-      padding: 30px 30px 30px 30px;
-    }
-
-    .borderbottom {
-      border-bottom: 1px solid #f2eeed;
-    }
-
-    .subhead {
-      font-size: 15px;
-      color: #ffffff;
-      font-family: sans-serif;
-      letter-spacing: 10px;
-      text-align: center;
-    }
-
-    .h1,
-    .bodycopy {
-      color: #EC9E26;
-      font-family: sans-serif;
-    }
-
-    .h2 {
-      color: #000000;
-      font-family: sans-serif;
-    }
-
-    .h1 {
-      font-size: 28px;
-      line-height: 38px;
-      font-weight: bold;
-    }
-
-    .h2 {
-      padding: 0 0 15px 0;
-      font-size: 24px;
-      line-height: 28px;
-      font-weight: bold;
-    }
-
-    .fbButton {
-      font-size: 12px;
-      text-decoration: none;
-      font-family: sans-serif;
-      color: #ffffff;
-    }
-
-    .bodycopy {
-      color: #000000;
-      font-size: 16px;
-      line-height: 22px;
-    }
-
-    .bodycopysmaller {
-      color: #000000;
-      font-size: 14px;
-      line-height: 22px;
-      font-family: sans-serif;
-    }
-
-    .button {
-      text-align: center;
-      font-size: 18px;
-      font-family: sans-serif;
-      font-weight: bold;
-      padding: 0 30px 0 30px;
-    }
-
-    .button a {
-      color: #ffffff;
-      text-decoration: none;
-    }
-
-    .footer {
-      padding: 20px 30px 15px 30px;
-    }
-
-    .footercopy {
-      font-family: sans-serif;
-      font-size: 14px;
-      color: #ffffff;
-    }
-
-    .footercopy a {
-      color: #ffffff;
-      text-decoration: underline;
-    }
-
-    .activate {
-      margin-top: 20px;
-      padding: 10px 50px 10px 50px;
-      text-align: center;
-      background: #666666;
-      border-radius: 3px;
-      text-decoration: none !important;
-      font-weight: bold;
-    }
-
-    code {
-      font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-      background-color: #F9F2F4;
-      color: #C7254E;
-      padding: 3px;
-    }
-
-    @media only screen and (max-width: 550px),
-    screen and (max-device-width: 550px) {
-      body[yahoo] .hide {
-        display: none !important;
-      }
-
-      body[yahoo] .buttonwrapper {
-        background-color: transparent !important;
-      }
-
-      body[yahoo] .button {
-        padding: 0px !important;
-      }
-
-      body[yahoo] .button a {
-        background-color: #e05443;
-        padding: 15px 15px 13px !important;
-      }
-
-    }
-
-    /*@media only screen and (min-device-width: 601px) {
-    .content {width: 600px !important;}
-    .col425 {width: 425px!important;}
-    .col380 {width: 380px!important;}
-    }*/
-  </style>
-</head>
-
-<body yahoo bgcolor='#ffffff' border: 1px solid #e5e5e5; style='margin: 0;padding: 0;min-width: 100%!important;'>
-  <table width='100%' bgcolor='#ffffff' border='0' cellpadding='0' cellspacing='0'>
-    <tr>
-      <td>
-        <!--[if (gte mso 9)|(IE)]>
-      <table width='600' align='center' cellpadding='0' cellspacing='0' border='0'>
-        <tr>
-          <td>
-      <![endif]-->
-        <table bgcolor='#ffffff' class='content' align='center' cellpadding='0' cellspacing='0' border='0'
-          style='width: 100%;max-width: 600px;'>
-          <tr>
-            <td class='innerpadding borderbottom'
-              style='padding: 15px 0px 15px 0px;border-bottom: 1px solid #f2eeed;'>
-              <table width='100%' border='0' cellspacing='0' cellpadding='0'>
-                <tr>
-                  <td style='color: #283747;font-family: sans-serif; padding: 0px 10px 0px 0px; font-size: 18px; vertical-align: middle; text-align: left;'>
-                    <b>${escapeHtml(data.title)}</b>
-                  </td>
-                  <td style='width: 154px; text-align: right; vertical-align: middle;'>
-                    ${renderLogo()}
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+  return renderEmailShell(
+    data.title,
+    `
           <tr>
             <td class='innerpadding'
               style='padding: 10px 0px 0px 0px; font-family: sans-serif; font-size: 13px; color: #c0392b;'>
@@ -615,23 +422,11 @@ export default function emailTemplate(data: AttendanceReportData): string {
             <td class='innerpadding borderbottom'
               style='padding: 15px 0px 10px 0px;border-bottom: 0px solid #f2eeed; font-family: sans-serif; font-size: 16px;'>
               ${formatDateDdMmYyyySlash(data.periodStart)} to ${
-    formatDateDdMmYyyySlash(data.periodEnd)
-  } - ${data.rows.length} Students at Risk
+      formatDateDdMmYyyySlash(data.periodEnd)
+    } - ${data.rows.length} Students at Risk
             </td>
           </tr>
           ${renderDailyBreakdown(data.dailyBreakdown)}
-          ${renderAbsenceBody(data.rows, data.threshold)}
-          <tr>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-  <!--[if (gte mso 9)|(IE)]>
-          </td>
-        </tr>
-    </table>
-    <![endif]-->
-</body>
-</html>`
+          ${renderAbsenceBody(data.rows, data.threshold)}`,
+  )
 }
