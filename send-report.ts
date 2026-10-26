@@ -1,10 +1,9 @@
 import './check-env.ts'
 import sql from './db.ts'
-import config from './config/config.ts'
 import {
   buildFullReportData,
   buildSubjectLine,
-  getStudentAttendance,
+  getReportDatasets,
 } from './attendance-data.ts'
 import reports, { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
@@ -37,10 +36,7 @@ if (!to || to.length === 0) {
 // report rows always carry both a year and a term figure per student now
 // (see AbsenceRow), so both datasets are fetched unconditionally rather
 // than choosing one via a CLI arg.
-const [yearDataset, termDataset] = await Promise.all([
-  getStudentAttendance(config.year),
-  getStudentAttendance(config.getCurrentTerm()),
-])
+const { yearDataset, termDataset } = await getReportDatasets()
 const data = await buildFullReportData(yearDataset, termDataset, def)
 
 const html = emailTemplate(data)

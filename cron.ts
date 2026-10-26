@@ -12,7 +12,7 @@ import { runEveningCheckAndEmail, runSyncAndEmail } from './sync.ts'
 import {
   buildFullReportData,
   buildSubjectLine,
-  getStudentAttendance,
+  getReportDatasets,
 } from './attendance-data.ts'
 import { getReport } from './reports/registry.ts'
 import emailTemplate from './email-templates/email-template.ts'
@@ -33,10 +33,7 @@ function isSchoolWeekday(): boolean {
 // one shared year/term dataset fetch — mirrors send-report.ts's per-report
 // flow but loops instead of taking a single report id from argv.
 async function sendScheduledReports(currentTerm: Period) {
-  const [yearDataset, termDataset] = await Promise.all([
-    getStudentAttendance(config.year),
-    getStudentAttendance(currentTerm),
-  ])
+  const { yearDataset, termDataset } = await getReportDatasets(currentTerm)
 
   const enabledReports = cronConfig.reports.filter((entry) => entry.enabled)
   let sentCount = 0

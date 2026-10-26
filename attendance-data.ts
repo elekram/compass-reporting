@@ -15,7 +15,7 @@ import {
   StudentAttendancePercentage,
   StudentRosterEntry,
 } from './api/compass-api.types.ts'
-import { Period } from './config/config.ts'
+import config, { Period } from './config/config.ts'
 import {
   addDaysIso,
   lastCompleteSchoolDateIso,
@@ -664,6 +664,27 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
     totalStudents: matched.length,
     students: matched.map((p) => toStudentAttendance(p, trends.get(p.compassPersonId))),
   }
+}
+
+// the two datasets every per-student report is built from — year to date,
+// plus the given term — since each student's row shows both a Year and a
+// Term figure (see AbsenceRow). Shared by cron.ts and the manual report
+// scripts. The term defaults to the current one, which throws during the
+// school holidays (see config.ts's getCurrentTerm); cron.ts passes the term
+// it has already checked.
+export interface ReportDatasets {
+  yearDataset: AttendanceDataset
+  termDataset: AttendanceDataset
+}
+
+export async function getReportDatasets(
+  term: Period = config.getCurrentTerm(),
+): Promise<ReportDatasets> {
+  const [yearDataset, termDataset] = await Promise.all([
+    getStudentAttendance(config.year),
+    getStudentAttendance(term),
+  ])
+  return { yearDataset, termDataset }
 }
 
 function toPeriodMetrics(

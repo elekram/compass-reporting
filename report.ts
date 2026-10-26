@@ -1,14 +1,10 @@
 import './check-env.ts'
 import { stringify } from '@std/csv'
 import sql from './db.ts'
-import config from './config/config.ts'
-import { AbsenceRow, buildReportData, getStudentAttendance } from './attendance-data.ts'
+import { AbsenceRow, buildReportData, getReportDatasets } from './attendance-data.ts'
 import reports from './reports/registry.ts'
 
-const [yearDataset, termDataset] = await Promise.all([
-  getStudentAttendance(config.year),
-  getStudentAttendance(config.getCurrentTerm()),
-])
+const { yearDataset, termDataset } = await getReportDatasets()
 
 console.log(
   `${yearDataset.periodName} (${yearDataset.periodStart} to ${yearDataset.periodEnd}), ${yearDataset.totalStudents} students`,
