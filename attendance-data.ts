@@ -215,6 +215,31 @@ async function queryStudentRoster(): Promise<StudentRosterEntry[]> {
   return rows.map(toStudentRosterEntry)
 }
 
+// the two small reference tables every report joins period lines against:
+// Compass's status list and the cached student roster. Loaded once per
+// dataset build (see loadAssembledLines) instead of separately by each
+// report function.
+interface ReferenceData {
+  statuses: AttendanceStatus[]
+  students: StudentRosterEntry[]
+  // statusId -> status, for code lookups on raw lines (daily breakdown,
+  // away streaks)
+  statusById: Map<string, AttendanceStatus>
+}
+
+async function loadReferenceData(): Promise<ReferenceData> {
+  const [statusRows, students]: [StatusRow[], StudentRosterEntry[]] = await Promise.all([
+    sql<StatusRow[]>`SELECT * FROM statuses`,
+    queryStudentRoster(),
+  ])
+  const statuses = statusRows.map(toAttendanceStatus)
+  return {
+    statuses,
+    students,
+    statusById: new Map(statuses.map((s) => [s.statusId, s])),
+  }
+}
+
 function toPeriodAttendanceLine(row: PeriodLineRow): PeriodAttendanceLine {
   return {
     __type: '',
@@ -261,6 +286,18 @@ async function queryPeriodLines(
     WHERE ${startSchoolDate()} BETWEEN ${startIso} AND ${endIso}
   `
   return rows.map(toPeriodAttendanceLine)
+}
+
+// every period line in startIso..endIso (school dates, inclusive), joined to
+// its student and status — the input every percentage and status-group
+// figure is calculated from, so all reports read the data the same way.
+async function loadAssembledLines(
+  startIso: string,
+  endIso: string,
+  ref: ReferenceData,
+): Promise<AssembledAttendancePeriodLine[]> {
+  const lines = await queryPeriodLines(startIso, endIso)
+  return assembleAttendanceReport(lines, ref.statuses, ref.students)
 }
 
 // a reporting period capped at the last complete school day — reports never
@@ -341,7 +378,7 @@ interface AwayStreakLineRow {
 async function computeAwayStreaks(
   mostRecentDay: string,
   candidateIds: string[],
-  statusById: Map<string, StatusRow>,
+  statusById: Map<string, AttendanceStatus>,
   def: ReportDefinition,
 ): Promise<Map<string, number>> {
   if (candidateIds.length === 0) {
@@ -380,7 +417,7 @@ async function computeAwayStreaks(
     const status = statusById.get(row.prevalent_overall_status_id)
     codesByKey.get(key)!.set(
       row.period_code,
-      status?.school_system_export_identifier ?? null,
+      status?.schoolSystemExportIdentifier ?? null,
     )
   }
 
@@ -411,7 +448,7 @@ async function computeAwayStreaks(
 
 async function buildDailyBreakdownForDay(
   day: string,
-  statusById: Map<string, StatusRow>,
+  statusById: Map<string, AttendanceStatus>,
   studentById: Map<string, StudentRosterEntry>,
   def: ReportDefinition,
   computeAwayStreak: boolean,
@@ -455,7 +492,7 @@ async function buildDailyBreakdownForDay(
         return null
       }
       const status = statusById.get(line.prevalentOverallStatusId)
-      return status?.school_system_export_identifier ?? null
+      return status?.schoolSystemExportIdentifier ?? null
     })
 
     // see isFlaggedForCategory — explained reports also surface unexplained
@@ -516,16 +553,12 @@ export async function getDailyPeriodBreakdown(
     return []
   }
 
-  const [statusRows, students]: [StatusRow[], StudentRosterEntry[]] = await Promise.all([
-    sql<StatusRow[]>`SELECT * FROM statuses`,
-    queryStudentRoster(),
-  ])
-  const statusById = new Map(statusRows.map((s) => [s.status_id, s]))
-  const studentById = new Map(students.map((s) => [s.compassPersonId, s]))
+  const ref = await loadReferenceData()
+  const studentById = new Map(ref.students.map((s) => [s.compassPersonId, s]))
 
   const results = await Promise.all(
     days.map((day, index) =>
-      buildDailyBreakdownForDay(day, statusById, studentById, def, index === 0)
+      buildDailyBreakdownForDay(day, ref.statusById, studentById, def, index === 0)
     ),
   )
 
@@ -549,26 +582,19 @@ interface TrendPair {
 // student, for both absence categories. Both windows are inclusive school
 // date ranges of exactly TREND_WINDOW_DAYS days, back to back with no
 // overlap.
-async function getTrends(
-  statuses: AttendanceStatus[],
-  students: StudentRosterEntry[],
-): Promise<Map<string, TrendPair>> {
+async function getTrends(ref: ReferenceData): Promise<Map<string, TrendPair>> {
   const currentEnd = lastCompleteSchoolDateIso()
   const currentStart = addDaysIso(currentEnd, -(TREND_WINDOW_DAYS - 1))
   const previousEnd = addDaysIso(currentStart, -1)
   const previousStart = addDaysIso(previousEnd, -(TREND_WINDOW_DAYS - 1))
 
   const [currentLines, previousLines] = await Promise.all([
-    queryPeriodLines(currentStart, currentEnd),
-    queryPeriodLines(previousStart, previousEnd),
+    loadAssembledLines(currentStart, currentEnd, ref),
+    loadAssembledLines(previousStart, previousEnd, ref),
   ])
 
-  const currentPct = calculateAttendancePercentages(
-    assembleAttendanceReport(currentLines, statuses, students),
-  )
-  const previousPct = calculateAttendancePercentages(
-    assembleAttendanceReport(previousLines, statuses, students),
-  )
+  const currentPct = calculateAttendancePercentages(currentLines)
+  const previousPct = calculateAttendancePercentages(previousLines)
   const previousByStudent = new Map(previousPct.map((p) => [p.compassPersonId, p]))
 
   const trends = new Map<string, TrendPair>()
@@ -621,16 +647,10 @@ export async function getStudentAttendance(period: Period): Promise<AttendanceDa
   // over (see completedPeriodEnd).
   const end = completedPeriodEnd(period)
 
-  const [statusRows, students] = await Promise.all([
-    sql<StatusRow[]>`SELECT * FROM statuses`,
-    queryStudentRoster(),
-  ])
-  const statuses = statusRows.map(toAttendanceStatus)
-
-  const periodLines = await queryPeriodLines(period.start, end)
-  const assembled = assembleAttendanceReport(periodLines, statuses, students)
+  const ref = await loadReferenceData()
+  const assembled = await loadAssembledLines(period.start, end, ref)
   const percentages = calculateAttendancePercentages(assembled)
-  const trends = await getTrends(statuses, students)
+  const trends = await getTrends(ref)
 
   // unmatched students (no roster join — see the ~97% match rate caveat on
   // personGetStudentsBasic) are dropped here rather than shown as blank rows,
@@ -859,14 +879,7 @@ export async function getStatusGroupBreakdown(
 ): Promise<StatusGroupPeriodBreakdown> {
   const end = completedPeriodEnd(period)
 
-  const [statusRows, students] = await Promise.all([
-    sql<StatusRow[]>`SELECT * FROM statuses`,
-    queryStudentRoster(),
-  ])
-  const statuses = statusRows.map(toAttendanceStatus)
-
-  const periodLines = await queryPeriodLines(period.start, end)
-  const assembled = assembleAttendanceReport(periodLines, statuses, students)
+  const assembled = await loadAssembledLines(period.start, end, await loadReferenceData())
   // unmatched students (no roster join — see the ~97% match rate caveat on
   // personGetStudentsBasic) are dropped here, same as getStudentAttendance
   // does — there's no year level to attribute them to, so keeping them
