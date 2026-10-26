@@ -45,8 +45,19 @@ export const SCHOOL_TIMEZONE = schoolTimezone
 // the day before), which made the first school day of every term look like
 // a holiday. The 'en-CA' locale is only there because it formats as
 // YYYY-MM-DD.
+//
+// The formatter is built once: date.toLocaleDateString(…, { timeZone })
+// constructs a new Intl formatter on every call (~35µs), which made a full
+// year's report spend ~40s just converting period-line dates.
+const schoolDateFormat = new Intl.DateTimeFormat('en-CA', {
+  timeZone: SCHOOL_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
 export function schoolDateIso(date: Date = new Date()): string {
-  return date.toLocaleDateString('en-CA', { timeZone: SCHOOL_TIMEZONE })
+  return schoolDateFormat.format(date)
 }
 
 // the most recent school date that's fully over — yesterday, school-local.

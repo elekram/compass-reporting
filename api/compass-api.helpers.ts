@@ -145,6 +145,20 @@ export function calculateAttendancePercentages(
 ): StudentAttendancePercentage[] {
   const teachingLines = lines.filter((line) => line.teachingTime)
 
+  // every student's period 1 on a given day shares the same `start`, so a
+  // whole year has only a few thousand distinct start instants across
+  // hundreds of thousands of lines — each is converted to its school date
+  // once and reused.
+  const schoolDateByStart = new Map<string, string>()
+  const schoolDateOf = (start: string): string => {
+    let date = schoolDateByStart.get(start)
+    if (date === undefined) {
+      date = schoolDateIso(new Date(start))
+      schoolDateByStart.set(start, date)
+    }
+    return date
+  }
+
   const byStudent = new Map<string, AssembledAttendancePeriodLine[]>()
   for (const line of teachingLines) {
     if (!byStudent.has(line.compassPersonId)) {
@@ -172,7 +186,7 @@ export function calculateAttendancePercentages(
     // both Any Days and Full Days.
     const linesByDate = new Map<string, AssembledAttendancePeriodLine[]>()
     for (const line of studentLines) {
-      const date = schoolDateIso(new Date(line.start))
+      const date = schoolDateOf(line.start)
       if (!linesByDate.has(date)) {
         linesByDate.set(date, [])
       }
