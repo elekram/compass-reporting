@@ -2,11 +2,11 @@ import sql from './db.ts'
 import {
   assembleAttendanceReport,
   calculateAttendancePercentages,
+  isFlaggedForCategory,
+  isReportableAbsence,
   PRESENT_STATUS_EXPORT_ID,
-  REPORTABLE_STATUS_EXPORT_IDS,
   STATUS_GROUP_LABELS,
   STATUS_GROUPS,
-  UNEXPLAINED_STATUS_EXPORT_ID,
 } from './api/compass-api.helpers.ts'
 import {
   AssembledAttendancePeriodLine,
@@ -316,7 +316,7 @@ function classifyDailyCode(code: string | null): DailyCellKind {
   if (code === PRESENT_STATUS_EXPORT_ID) {
     return 'present'
   }
-  if (REPORTABLE_STATUS_EXPORT_IDS.has(code)) {
+  if (isReportableAbsence(code)) {
     return 'flagged'
   }
   return 'other'
@@ -347,10 +347,6 @@ async function computeAwayStreaks(
   if (candidateIds.length === 0) {
     return new Map()
   }
-
-  const inclusionIds = def.category === 'unexplained'
-    ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
-    : REPORTABLE_STATUS_EXPORT_IDS
 
   const schoolDays = await findMostRecentCompleteDays(AWAY_STREAK_LOOKBACK_DAYS)
   // findMostRecentCompleteDays looks backward from "now", not from
@@ -395,7 +391,7 @@ async function computeAwayStreaks(
     }
     return TEACHING_PERIOD_CODES.every((code) => {
       const exportId = periods.get(code)
-      return exportId != null && inclusionIds.has(exportId)
+      return exportId != null && isFlaggedForCategory(def.category, exportId)
     })
   }
 
@@ -434,14 +430,6 @@ async function buildDailyBreakdownForDay(
     linesByStudent.get(line.compassPersonId)!.push(line)
   }
 
-  // unexplained reports pull a student in only for the unexplained code;
-  // explained reports pull a student in for any reportable code, including
-  // unexplained (500) — per stakeholder request, the daily breakdown table
-  // should surface unexplained periods alongside explained ones.
-  const inclusionIds = def.category === 'unexplained'
-    ? new Set([UNEXPLAINED_STATUS_EXPORT_ID])
-    : REPORTABLE_STATUS_EXPORT_IDS
-
   const candidates: {
     compassPersonId: string
     name: string
@@ -470,7 +458,11 @@ async function buildDailyBreakdownForDay(
       return status?.school_system_export_identifier ?? null
     })
 
-    const hasFlaggedPeriod = codes.some((code) => code !== null && inclusionIds.has(code))
+    // see isFlaggedForCategory — explained reports also surface unexplained
+    // periods here, per stakeholder request.
+    const hasFlaggedPeriod = codes.some((code) =>
+      isFlaggedForCategory(def.category, code)
+    )
     if (!hasFlaggedPeriod) {
       continue
     }

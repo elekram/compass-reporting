@@ -79,6 +79,44 @@ export const REPORTABLE_STATUS_EXPORT_IDS = new Set([
   '807',
 ])
 
+// ---- absence rules ----
+// the one place that decides what a period's status code counts as. Every
+// figure in every report goes through these, so changing what's "explained"
+// (or flagged) is a change here only. All take the line's
+// schoolSystemExportIdentifier, which is null when the line's status isn't
+// in the statuses table.
+
+// the "unexplained" category: code 500 only.
+export function isUnexplainedAbsence(code: string | null): boolean {
+  return code === UNEXPLAINED_STATUS_EXPORT_ID
+}
+
+// any of the stakeholder's curated reportable codes, unexplained (500)
+// included.
+export function isReportableAbsence(code: string | null): boolean {
+  return code !== null && REPORTABLE_STATUS_EXPORT_IDS.has(code)
+}
+
+// the "explained" category for attendance %, Any Days and Full Days: a
+// reportable code *other than* unexplained, so the two categories never
+// count the same period.
+export function isExplainedAbsence(code: string | null): boolean {
+  return isReportableAbsence(code) && !isUnexplainedAbsence(code)
+}
+
+// whether a period pulls a student into a report's daily period breakdown
+// and counts towards its away streaks. Wider than isExplainedAbsence for
+// explained reports: per stakeholder request those surface unexplained
+// periods alongside explained ones.
+export function isFlaggedForCategory(
+  category: 'unexplained' | 'explained',
+  code: string | null,
+): boolean {
+  return category === 'unexplained'
+    ? isUnexplainedAbsence(code)
+    : isReportableAbsence(code)
+}
+
 // stakeholder-specified groupings for the per-student breakdown row —
 // index order here is display order (left to right) in the report. Exported
 // so attendance-data.ts's status-group-percentage breakdown (a separate,
@@ -121,16 +159,10 @@ export function calculateAttendancePercentages(
       0,
     )
     const unexplainedAbsenceMinutes = studentLines
-      .filter((line) =>
-        line.statusSchoolSystemExportIdentifier === UNEXPLAINED_STATUS_EXPORT_ID
-      )
+      .filter((line) => isUnexplainedAbsence(line.statusSchoolSystemExportIdentifier))
       .reduce((sum, line) => sum + line.expectedMinutes, 0)
     const explainedAbsenceMinutes = studentLines
-      .filter((line) =>
-        line.statusSchoolSystemExportIdentifier !== null &&
-        REPORTABLE_STATUS_EXPORT_IDS.has(line.statusSchoolSystemExportIdentifier) &&
-        line.statusSchoolSystemExportIdentifier !== UNEXPLAINED_STATUS_EXPORT_ID
-      )
+      .filter((line) => isExplainedAbsence(line.statusSchoolSystemExportIdentifier))
       .reduce((sum, line) => sum + line.expectedMinutes, 0)
 
     // grouped by the school-local date, not the UTC date in `start` (Compass
@@ -154,12 +186,10 @@ export function calculateAttendancePercentages(
 
     for (const dayLines of linesByDate.values()) {
       const unexplainedCount = dayLines.filter((line) =>
-        line.statusSchoolSystemExportIdentifier === UNEXPLAINED_STATUS_EXPORT_ID
+        isUnexplainedAbsence(line.statusSchoolSystemExportIdentifier)
       ).length
       const explainedCount = dayLines.filter((line) =>
-        line.statusSchoolSystemExportIdentifier !== null &&
-        REPORTABLE_STATUS_EXPORT_IDS.has(line.statusSchoolSystemExportIdentifier) &&
-        line.statusSchoolSystemExportIdentifier !== UNEXPLAINED_STATUS_EXPORT_ID
+        isExplainedAbsence(line.statusSchoolSystemExportIdentifier)
       ).length
 
       if (unexplainedCount > 0) {
