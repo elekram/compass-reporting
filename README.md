@@ -36,17 +36,17 @@ or the server's error and `test-mail.ts: FAILED` otherwise. With no address it s
 
 ### All tasks
 
-| Command                                        | Needs Postgres | Purpose                                                                                                                                                                       |
-| ---------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `./run.sh check-env`                           | no             | Checks `deno.env` has every required variable, without running anything else.                                                                                                 |
-| `./run.sh test-mail [email...]`                | no             | Sends a short test email with the `MAIL_*` settings, to the given addresses or `SYNC_SUMMARY_RECIPIENTS`.                                                                     |
-| `./run.sh query <name> [args...]`              | no             | Pulls raw data straight from a Compass endpoint, bypassing Postgres. `./run.sh query` lists the available queries.                                                            |
-| `./run.sh sync`                                | yes            | Syncs statuses, the student roster and period lines from Compass into Postgres now, then emails a run summary or failure alert to `SYNC_SUMMARY_RECIPIENTS`.                  |
-| `./run.sh evening-check`                       | yes            | Runs the evening discrepancy check once: trailing resync, row-count check, and a full-year resync only if the gap exceeds `DISCREPANCY_ESCALATION_THRESHOLD`.                 |
-| `./run.sh report`                              | yes            | Writes a CSV and a console table per registered report. No email.                                                                                                             |
-| `./run.sh email-preview [report-id]`           | yes            | Renders one report's email to `email-templates/preview-<id>.html` for viewing in a browser, without sending anything.                                                         |
-| `./run.sh send-report <report-id> [email...]`  | yes            | Sends one report by id. With addresses, it goes only to them, which is handy for testing against yourself.                                                                    |
-| `./run.sh send-status-group-report <email...>` | yes            | Sends the term-by-term breakdown to the given addresses. Use `--preview` instead of addresses to write `email-templates/preview-status-group-breakdown.html` without sending. |
+| Command                                        | Needs Postgres | Purpose                                                                                                                                                                                                                   |
+| ---------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./run.sh check-env`                           | no             | Checks `deno.env` has every required variable, without running anything else.                                                                                                                                             |
+| `./run.sh test-mail [email...]`                | no             | Sends a short test email with the `MAIL_*` settings, to the given addresses or `SYNC_SUMMARY_RECIPIENTS`.                                                                                                                 |
+| `./run.sh query <name> [args...]`              | no             | Pulls raw data straight from a Compass endpoint, bypassing Postgres. `./run.sh query` lists the available queries; `query period-codes <date>` shows a school's period codes (see [Teaching periods](#teaching-periods)). |
+| `./run.sh sync`                                | yes            | Syncs statuses, the student roster and period lines from Compass into Postgres now, then emails a run summary or failure alert to `SYNC_SUMMARY_RECIPIENTS`.                                                              |
+| `./run.sh evening-check`                       | yes            | Runs the evening discrepancy check once: trailing resync, row-count check, and a full-year resync only if the gap exceeds `DISCREPANCY_ESCALATION_THRESHOLD`.                                                             |
+| `./run.sh report`                              | yes            | Writes a CSV and a console table per registered report. No email.                                                                                                                                                         |
+| `./run.sh email-preview [report-id]`           | yes            | Renders one report's email to `email-templates/preview-<id>.html` for viewing in a browser, without sending anything.                                                                                                     |
+| `./run.sh send-report <report-id> [email...]`  | yes            | Sends one report by id. With addresses, it goes only to them, which is handy for testing against yourself.                                                                                                                |
+| `./run.sh send-status-group-report <email...>` | yes            | Sends the term-by-term breakdown to the given addresses. Use `--preview` instead of addresses to write `email-templates/preview-status-group-breakdown.html` without sending.                                             |
 
 `sync` and `send-*` act for real: `sync` emails the summary recipients, and the `send-*`
 tasks email whoever you name. `CRON_DEBUG_MODE` only redirects the scheduled sends.
@@ -137,6 +137,7 @@ the app refuses to start without it.
 | `SCHOOL_TIMEZONE`     | yes      | `Australia/Melbourne`                    | IANA timezone name (not an abbreviation like `AEST`, which has no daylight saving). Decides the school's local day and time everywhere: when cron jobs fire, the sync window, and how period lines are grouped into school days. |
 | `SCHOOL_LOGO_URL`     | no       | `https://www.yourschool.edu.au/logo.png` | Logo shown top-right in every report email. Must be a public http(s) image URL, because email clients fetch it when the email is opened. Shown 154px wide, height follows the image. No logo if unset.                           |
 | `TERM_1`, `TERM_2`, … | `TERM_1` | `2026-01-27,2026-04-02`                  | The school year's terms, each `<start>,<end>` as `YYYY-MM-DD`, both days included. See [Term dates](#term-dates).                                                                                                                |
+| `TEACHING_PERIODS`    | yes      | `1,2,3,4,5,6`                            | The Compass period codes to report on, in timetable order. See [Teaching periods](#teaching-periods).                                                                                                                            |
 | `TZ`                  | no       | `Australia/Melbourne`                    | Not needed: the app uses `SCHOOL_TIMEZONE` for everything school-related. Harmless to keep.                                                                                                                                      |
 
 **Database**
@@ -174,6 +175,31 @@ three or four terms just sets three or four. Each term must start after the prev
 ends, and the numbers can't have gaps (a `TERM_3` with no `TERM_2` is an error). The year
 runs from the first term's start to the last term's end. Update them at the start of each
 school year.
+
+#### Teaching periods
+
+`TEACHING_PERIODS` lists the periods every figure is based on: attendance %, Days and Full
+Days, the daily period breakdown (one column per code, in this order), away streaks and
+the term-by-term breakdown. A period counts only if its code is listed **and** Compass
+marks it as teaching time, so before/after school, recess and lunch blocks never count.
+
+To find a school's codes, ask Compass what it uses on a normal school day. No sync or
+database is needed, and `TEACHING_PERIODS` doesn't have to be set yet:
+
+```
+./run.sh query period-codes 2026-10-20
+```
+
+It lists each code with its usual start time, whether Compass marks it as teaching time,
+and whether `TEACHING_PERIODS` already lists it. For example, a four-period school whose
+day runs Before, Period 1, Period 2, Recess, Period 3, Lunch 1, Lunch 2, Period 4, After
+would typically set `TEACHING_PERIODS=1,2,3,4`. Numeric codes are shown as `P1`, `P2`, …
+in the emails, and any other code as it is.
+
+A day is judged against the periods each student actually had: a student counts as away
+all day (Full Days, away streaks) when every listed period they had that day was an
+absence. A day only appears in the daily breakdown once at least 40% of the roster has
+lines synced for it, so a partly-marked day isn't shown.
 
 #### Mail security
 
@@ -220,6 +246,7 @@ TERM_1=2026-01-27,2026-04-02
 TERM_2=2026-04-20,2026-06-26
 TERM_3=2026-07-13,2026-09-18
 TERM_4=2026-10-05,2026-12-18
+TEACHING_PERIODS=1,2,3,4,5,6
 
 DB_URL=postgres://postgres:<postgres password>@postgres:5432/docker
 

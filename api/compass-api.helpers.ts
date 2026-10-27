@@ -5,7 +5,9 @@ import {
   StudentAttendancePercentage,
   StudentRosterEntry,
 } from './compass-api.types.ts'
-import { schoolDateIso } from '../config/timezone.ts'
+import { schoolDateOfInstant } from '../config/timezone.ts'
+import { isTeachingPeriod } from '../config/periods.ts'
+import { groupBy, sumWhere } from '../collections.ts'
 
 // joins the three Compass endpoints into one flat row per period attendance
 // line: student identity via compassPersonId (originally a live
@@ -86,6 +88,11 @@ export const REPORTABLE_STATUS_EXPORT_IDS = new Set([
 // schoolSystemExportIdentifier, which is null when the line's status isn't
 // in the statuses table.
 
+// marked present.
+export function isPresent(code: string | null): boolean {
+  return code === PRESENT_STATUS_EXPORT_ID
+}
+
 // the "unexplained" category: code 500 only.
 export function isUnexplainedAbsence(code: string | null): boolean {
   return code === UNEXPLAINED_STATUS_EXPORT_ID
@@ -117,6 +124,62 @@ export function isFlaggedForCategory(
     : isReportableAbsence(code)
 }
 
+// ---- whole-day rules ----
+// a student's day = their teaching lines on one school date (see
+// isTeachingPeriod and schoolDateOfInstant). These decide Any Days, Full
+// Days and away streaks, all judged against the periods the student
+// actually had that day rather than the full timetable — so a short day,
+// or a period the student isn't timetabled for, is neither a gap nor an
+// absence.
+
+type CodedLine = { statusSchoolSystemExportIdentifier: string | null }
+type CodeRule = (code: string | null) => boolean
+
+// away for every period they had that day, by the given rule.
+export function isWholeDayAbsent(dayLines: CodedLine[], isAbsent: CodeRule): boolean {
+  return dayLines.length > 0 &&
+    dayLines.every((line) => isAbsent(line.statusSchoolSystemExportIdentifier))
+}
+
+// away for at least one period that day, by the given rule.
+export function isAnyPeriodAbsent(dayLines: CodedLine[], isAbsent: CodeRule): boolean {
+  return dayLines.some((line) => isAbsent(line.statusSchoolSystemExportIdentifier))
+}
+
+// Any Days / Full Days over one student's days.
+export function countAbsenceDays(
+  days: Iterable<CodedLine[]>,
+  isAbsent: CodeRule,
+): { any: number; full: number } {
+  let any = 0
+  let full = 0
+  for (const dayLines of days) {
+    if (isAnyPeriodAbsent(dayLines, isAbsent)) any++
+    if (isWholeDayAbsent(dayLines, isAbsent)) full++
+  }
+  return { any, full }
+}
+
+// whether a code belongs to one of STATUS_GROUPS — shared by the per-student
+// counts and the status-group percentage breakdown.
+export function isInStatusGroup(group: Set<string>, code: string | null): boolean {
+  return code !== null && group.has(code)
+}
+
+// total expected minutes of the lines whose code matches the rule (every
+// line when no rule is given) — the basis of every minutes-weighted figure:
+// attendance %, absence minutes and the status-group percentages.
+export function expectedMinutesWhere(
+  lines: Iterable<CodedLine & { expectedMinutes: number }>,
+  isCounted: CodeRule = () => true,
+): number {
+  return sumWhere(
+    lines,
+    (line) => isCounted(line.statusSchoolSystemExportIdentifier),
+    (line) => line.expectedMinutes,
+  )
+}
+
 // stakeholder-specified groupings for the per-student breakdown row —
 // index order here is display order (left to right) in the report. Exported
 // so attendance-data.ts's status-group-percentage breakdown (a separate,
@@ -137,95 +200,40 @@ export const STATUS_GROUPS: Set<string>[] = [
 // above).
 export const STATUS_GROUP_LABELS = ['200/201/209', '208/300', '211/212', '500/806', '807']
 
-// only teachingTime periods count — non-teaching blocks (BS/R/L1/L2/AS)
-// aren't tracked uniformly across students (see conversation on periodCode
-// coverage), so including them would unevenly pad expectedMinutes.
+// only the school's teaching periods count (see config/periods.ts's
+// isTeachingPeriod) — non-teaching blocks (before/after school, recess,
+// lunch) aren't tracked uniformly across students, so including them would
+// unevenly pad expectedMinutes.
 export function calculateAttendancePercentages(
   lines: AssembledAttendancePeriodLine[],
 ): StudentAttendancePercentage[] {
-  const teachingLines = lines.filter((line) => line.teachingTime)
-
-  // every student's period 1 on a given day shares the same `start`, so a
-  // whole year has only a few thousand distinct start instants across
-  // hundreds of thousands of lines — each is converted to its school date
-  // once and reused.
-  const schoolDateByStart = new Map<string, string>()
-  const schoolDateOf = (start: string): string => {
-    let date = schoolDateByStart.get(start)
-    if (date === undefined) {
-      date = schoolDateIso(new Date(start))
-      schoolDateByStart.set(start, date)
-    }
-    return date
-  }
-
-  const byStudent = new Map<string, AssembledAttendancePeriodLine[]>()
-  for (const line of teachingLines) {
-    if (!byStudent.has(line.compassPersonId)) {
-      byStudent.set(line.compassPersonId, [])
-    }
-    byStudent.get(line.compassPersonId)!.push(line)
-  }
+  const byStudent = groupBy(
+    lines.filter(isTeachingPeriod),
+    (line) => line.compassPersonId,
+  )
 
   return [...byStudent.entries()].map(([compassPersonId, studentLines]) => {
-    const expectedMinutes = studentLines.reduce(
-      (sum, line) => sum + line.expectedMinutes,
-      0,
+    const expectedMinutes = expectedMinutesWhere(studentLines)
+    const unexplainedAbsenceMinutes = expectedMinutesWhere(
+      studentLines,
+      isUnexplainedAbsence,
     )
-    const unexplainedAbsenceMinutes = studentLines
-      .filter((line) => isUnexplainedAbsence(line.statusSchoolSystemExportIdentifier))
-      .reduce((sum, line) => sum + line.expectedMinutes, 0)
-    const explainedAbsenceMinutes = studentLines
-      .filter((line) => isExplainedAbsence(line.statusSchoolSystemExportIdentifier))
-      .reduce((sum, line) => sum + line.expectedMinutes, 0)
+    const explainedAbsenceMinutes = expectedMinutesWhere(studentLines, isExplainedAbsence)
 
-    // grouped by the school-local date, not the UTC date in `start` (Compass
-    // sends UTC, e.g. "2026-02-23T22:40:00Z" for period 2 on Tue 24 Feb in
-    // Melbourne). Taking the UTC date used to split every school day in two —
-    // periods before ~10/11am local landed on the previous date — inflating
-    // both Any Days and Full Days.
-    const linesByDate = new Map<string, AssembledAttendancePeriodLine[]>()
-    for (const line of studentLines) {
-      const date = schoolDateOf(line.start)
-      if (!linesByDate.has(date)) {
-        linesByDate.set(date, [])
-      }
-      linesByDate.get(date)!.push(line)
-    }
-
-    let unexplainedDaysAny = 0
-    let unexplainedDaysFull = 0
-    let explainedDaysAny = 0
-    let explainedDaysFull = 0
-
-    for (const dayLines of linesByDate.values()) {
-      const unexplainedCount = dayLines.filter((line) =>
-        isUnexplainedAbsence(line.statusSchoolSystemExportIdentifier)
-      ).length
-      const explainedCount = dayLines.filter((line) =>
-        isExplainedAbsence(line.statusSchoolSystemExportIdentifier)
-      ).length
-
-      if (unexplainedCount > 0) {
-        unexplainedDaysAny++
-      }
-      if (unexplainedCount === dayLines.length) {
-        unexplainedDaysFull++
-      }
-      if (explainedCount > 0) {
-        explainedDaysAny++
-      }
-      if (explainedCount === dayLines.length) {
-        explainedDaysFull++
-      }
-    }
+    // grouped by school-local date, not the UTC date in `start` (Compass
+    // sends UTC — taking its date used to split every school day in two and
+    // inflate Any Days and Full Days). See schoolDateOfInstant.
+    const days = [
+      ...groupBy(studentLines, (line) => schoolDateOfInstant(line.start)).values(),
+    ]
+    const unexplainedDays = countAbsenceDays(days, isUnexplainedAbsence)
+    const explainedDays = countAbsenceDays(days, isExplainedAbsence)
 
     const { firstName, lastName, studentCode, yearLevel } = studentLines[0]
 
     const statusGroupCounts = STATUS_GROUPS.map((group) =>
       studentLines.filter((line) =>
-        line.statusSchoolSystemExportIdentifier !== null &&
-        group.has(line.statusSchoolSystemExportIdentifier)
+        isInStatusGroup(group, line.statusSchoolSystemExportIdentifier)
       ).length
     )
 
@@ -239,18 +247,35 @@ export function calculateAttendancePercentages(
       unexplainedAbsenceMinutes,
       explainedAbsenceMinutes,
       statusGroupCounts,
-      attendancePercentage: expectedMinutes === 0
-        ? null
-        : Math.round((1 - unexplainedAbsenceMinutes / expectedMinutes) * 1000) /
-          10,
-      explainedAttendancePercentage: expectedMinutes === 0
-        ? null
-        : Math.round((1 - explainedAbsenceMinutes / expectedMinutes) * 1000) /
-          10,
-      unexplainedDaysAny,
-      unexplainedDaysFull,
-      explainedDaysAny,
-      explainedDaysFull,
+      attendancePercentage: attendancePercentage(
+        unexplainedAbsenceMinutes,
+        expectedMinutes,
+      ),
+      explainedAttendancePercentage: attendancePercentage(
+        explainedAbsenceMinutes,
+        expectedMinutes,
+      ),
+      unexplainedDaysAny: unexplainedDays.any,
+      unexplainedDaysFull: unexplainedDays.full,
+      explainedDaysAny: explainedDays.any,
+      explainedDaysFull: explainedDays.full,
     }
   })
+}
+
+// a fraction (0..1) as a percentage rounded to one decimal place — the
+// rounding every percentage in the reports uses.
+export function roundedPercent(fraction: number): number {
+  return Math.round(fraction * 1000) / 10
+}
+
+// % of expected minutes attended, i.e. not absent by the given minutes;
+// null when there were no expected minutes at all.
+function attendancePercentage(
+  absentMinutes: number,
+  expectedMinutes: number,
+): number | null {
+  return expectedMinutes === 0
+    ? null
+    : roundedPercent(1 - absentMinutes / expectedMinutes)
 }

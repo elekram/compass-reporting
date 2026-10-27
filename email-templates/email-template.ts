@@ -5,6 +5,7 @@ import {
   DailyBreakdownData,
   DailyCellKind,
   DailyPeriodCell,
+  groupByYearLevel,
   PeriodMetrics,
 } from '../attendance-data.ts'
 import { escapeHtml, renderEmailShell } from './html.ts'
@@ -15,33 +16,6 @@ import { weekdayOfDateIso } from '../config/timezone.ts'
 function formatDateDdMmYyyySlash(dateIso: string): string {
   const [y, m, d] = dateIso.split('-')
   return `${d}/${m}/${y}`
-}
-
-// groups preserve the incoming row order (rows arrive pre-sorted ascending
-// by attendancePercentage from getAttendanceReportData), so each year-level
-// bucket ends up sorted by percentage without needing to re-sort here.
-function groupByYearLevel(rows: AbsenceRow[]): Array<[string, AbsenceRow[]]> {
-  const groups = new Map<string, AbsenceRow[]>()
-  for (const row of rows) {
-    const key = row.yearLevel ?? 'Unknown'
-    if (!groups.has(key)) {
-      groups.set(key, [])
-    }
-    groups.get(key)!.push(row)
-  }
-
-  const orderedKeys = [...groups.keys()].sort((a, b) => {
-    const numericA = Number(a)
-    const numericB = Number(b)
-    if (!Number.isNaN(numericA) && !Number.isNaN(numericB)) {
-      return numericA - numericB
-    }
-    if (!Number.isNaN(numericA)) return -1
-    if (!Number.isNaN(numericB)) return 1
-    return a.localeCompare(b)
-  })
-
-  return orderedKeys.map((key) => [key, groups.get(key)!])
 }
 
 // bands set by stakeholder request — 85%+ green, 80-85% orange, below 80% red.
@@ -270,9 +244,9 @@ function renderDailyBreakdownRows(rows: DailyBreakdownData['rows']): string {
 }
 
 function renderDailyDayTable(daily: DailyBreakdownData): string {
-  const periodHeaders = daily.rows[0].cells.map((_, i) => `
-                  <td style='padding: 6px 4px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 12px; font-weight: bold; color: #283747; text-align: center;'>P${
-    i + 1
+  const periodHeaders = daily.periodLabels.map((label) => `
+                  <td style='padding: 6px 4px; border-bottom: 2px solid #283747; font-family: sans-serif; font-size: 12px; font-weight: bold; color: #283747; text-align: center;'>${
+    escapeHtml(label)
   }</td>`).join('')
 
   return `

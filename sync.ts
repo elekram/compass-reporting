@@ -13,7 +13,12 @@ import {
 } from './api/compass-api.types.ts'
 import config from './config/config.ts'
 import mailConfig from './config/mail-config.ts'
-import { addDaysIso, schoolDateIso } from './config/timezone.ts'
+import {
+  addDaysIso,
+  compassWindowEnd,
+  compassWindowStart,
+  schoolDateIso,
+} from './config/timezone.ts'
 import { sendMail as sendMailRaw } from './mailer.ts'
 import { endRun, log, logError, startRun } from './logger.ts'
 
@@ -58,36 +63,15 @@ if (
   )
 }
 
-// the API's lBound/uBound are sent as `${date}T00:00:00Z` — *instants*, not
-// school dates (see attendanceGetPeriodLinesBetweenBounds) — so for a
-// Melbourne school a bound of "2026-08-10" is 10am/11am local on the 10th,
-// not local midnight. Both edges of every fetch window are therefore padded
-// by a day, so the window always covers whole school days:
-//
-// syncWindowEnd: today's school date + 1, i.e. UTC midnight tomorrow — past
-// the end of today's last period for any school east of roughly UTC-6, which
-// covers every region Compass operates in. (This used to be
-// new Date().toISOString()'s UTC date: the 07:30 Melbourne job runs at 21:30
-// UTC the *previous* day, so the window shut at 10am on the very day being
-// reported — periods 3-6 were never fetched and rendered as "Unscheduled".)
+// today's fetch window end (see config/timezone.ts's compassWindowEnd).
 function syncWindowEnd(): string {
-  return addDaysIso(schoolDateIso(), 1)
-}
-
-// windowStart: the school date before the first one wanted, for the same
-// reason — `${firstSchoolDate}T00:00:00Z` alone is 10/11am local on that day,
-// which used to leave periods 1-2 of the year's first day (and of each
-// trailing resync's first day) permanently unfetched. Fetching an extra
-// earlier day is harmless: upserts are idempotent and every report filters
-// by school date anyway.
-function windowStart(firstSchoolDate: string): string {
-  return addDaysIso(firstSchoolDate, -1)
+  return compassWindowEnd(schoolDateIso())
 }
 
 // the year-to-date fetch window's start, shared by the incremental sync, the
 // evening check's full-year resync, and its row count (which must use the
 // exact same bounds as the Compass total it's compared against).
-const YEAR_WINDOW_START = windowStart(config.year.start)
+const YEAR_WINDOW_START = compassWindowStart(config.year.start)
 
 // sync_state is only ever written after a run fully completes (see bottom of
 // this file), so reading it back is always safe — unlike computing
@@ -312,7 +296,7 @@ let currentStage = 'starting up'
 // sync) and runEveningCheckAndEmail (as a cheap self-heal pass before
 // deciding whether the far more expensive full-term resync is warranted).
 async function runTrailingResync(windowEnd: string): Promise<number> {
-  const trailingStartIso = windowStart(
+  const trailingStartIso = compassWindowStart(
     addDaysIso(schoolDateIso(), -TRAILING_RESYNC_DAYS),
   )
 

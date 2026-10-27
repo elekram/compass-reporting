@@ -60,6 +60,23 @@ export function schoolDateIso(date: Date = new Date()): string {
   return schoolDateFormat.format(date)
 }
 
+// schoolDateIso for an instant given as an ISO string — a period line's
+// `start`. Remembered per instant: every student's period 1 on a given day
+// shares the same start, so a whole year has only a few thousand distinct
+// instants across a million-plus lines, and each is converted once. The
+// cache only ever holds period start times, so it stays that size even in
+// cron.ts's long-running process.
+const schoolDateByInstant = new Map<string, string>()
+
+export function schoolDateOfInstant(isoInstant: string): string {
+  let date = schoolDateByInstant.get(isoInstant)
+  if (date === undefined) {
+    date = schoolDateIso(new Date(isoInstant))
+    schoolDateByInstant.set(isoInstant, date)
+  }
+  return date
+}
+
 // the most recent school date that's fully over — yesterday, school-local.
 // The upper bound for every "up to now" range in the reports, so a morning
 // run never counts today's periods (which exist in Compass ahead of time,
@@ -114,6 +131,32 @@ export function addDaysIso(dateIso: string, days: number): string {
   const d = calendarDate(dateIso)
   d.setUTCDate(d.getUTCDate() + days)
   return d.toISOString().substring(0, 10)
+}
+
+// ---- Compass fetch windows ----
+// Compass's lBound/uBound are sent as `${date}T00:00:00Z` — *instants*, not
+// school dates (see attendanceGetPeriodLinesBetweenBounds) — so for a
+// Melbourne school a bound of "2026-08-10" is 10am/11am local on the 10th,
+// not local midnight. Both edges of every fetch window are therefore padded
+// by a day, so a window always covers whole school days. Fetching the extra
+// part-days is harmless: upserts are idempotent and everything downstream
+// filters by school date. Used by sync.ts and compass-query.ts.
+
+// the lBound date for a window starting on firstSchoolDate. Unpadded, this
+// used to leave periods 1-2 of the year's first day (and of each trailing
+// resync's first day) permanently unfetched.
+export function compassWindowStart(firstSchoolDate: string): string {
+  return addDaysIso(firstSchoolDate, -1)
+}
+
+// the uBound date for a window ending on lastSchoolDate: UTC midnight the
+// next day — past the end of that day's last period for any school east of
+// roughly UTC-6, which covers every region Compass operates in. (The sync's
+// window end used to be new Date().toISOString()'s UTC date: the 07:30
+// Melbourne job runs at 21:30 UTC the *previous* day, so the window shut at
+// 10am on the very day being reported — periods 3-6 were never fetched.)
+export function compassWindowEnd(lastSchoolDate: string): string {
+  return addDaysIso(lastSchoolDate, 1)
 }
 
 // weekday name of a school date, e.g. "Tuesday" / "Tue" — for email

@@ -29,6 +29,7 @@ const requiredEnvVars = [
   // only the first term is required here — TERM_2 onwards are read in order
   // until the first gap (see config/config.ts).
   'TERM_1',
+  'TEACHING_PERIODS',
   'MAIL_HOST',
   'MAIL_PORT',
   'MAIL_SECURITY',

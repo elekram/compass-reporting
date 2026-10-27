@@ -2,9 +2,13 @@ import sql from './db.ts'
 import {
   assembleAttendanceReport,
   calculateAttendancePercentages,
+  expectedMinutesWhere,
   isFlaggedForCategory,
+  isInStatusGroup,
+  isPresent,
   isReportableAbsence,
-  PRESENT_STATUS_EXPORT_ID,
+  isWholeDayAbsent,
+  roundedPercent,
   STATUS_GROUP_LABELS,
   STATUS_GROUPS,
 } from './api/compass-api.helpers.ts'
@@ -20,8 +24,11 @@ import {
   addDaysIso,
   lastCompleteSchoolDateIso,
   SCHOOL_TIMEZONE,
+  schoolDateOfInstant,
   weekdayOfDateIso,
 } from './config/timezone.ts'
+import { isTeachingPeriod, periodLabel, TEACHING_PERIOD_CODES } from './config/periods.ts'
+import { groupBy } from './collections.ts'
 import { AbsenceCategory, ReportDefinition } from './reports/types.ts'
 
 // trend windows are always relative to today, independent of whatever
@@ -92,6 +99,9 @@ const AWAY_STREAK_LOOKBACK_DAYS = 40
 // unset) or no complete day was found yet to report on.
 export interface DailyBreakdownData {
   date: string
+  // column headings, one per TEACHING_PERIODS code, same order as each
+  // row's cells (see config/periods.ts's periodLabel).
+  periodLabels: string[]
   rows: DailyBreakdownRow[]
 }
 
@@ -222,9 +232,6 @@ async function queryStudentRoster(): Promise<StudentRosterEntry[]> {
 interface ReferenceData {
   statuses: AttendanceStatus[]
   students: StudentRosterEntry[]
-  // statusId -> status, for code lookups on raw lines (daily breakdown,
-  // away streaks)
-  statusById: Map<string, AttendanceStatus>
 }
 
 async function loadReferenceData(): Promise<ReferenceData> {
@@ -232,12 +239,7 @@ async function loadReferenceData(): Promise<ReferenceData> {
     sql<StatusRow[]>`SELECT * FROM statuses`,
     queryStudentRoster(),
   ])
-  const statuses = statusRows.map(toAttendanceStatus)
-  return {
-    statuses,
-    students,
-    statusById: new Map(statuses.map((s) => [s.statusId, s])),
-  }
+  return { statuses: statusRows.map(toAttendanceStatus), students }
 }
 
 function toPeriodAttendanceLine(row: PeriodLineRow): PeriodAttendanceLine {
@@ -271,11 +273,14 @@ function startSchoolDate() {
 }
 
 // period lines whose school date falls within startIso..endIso, both
-// inclusive. Empty when endIso < startIso (e.g. a term's first morning,
-// before any of its days are complete).
+// inclusive — optionally only for the given students, filtered in SQL so a
+// lookup for a handful of students (away streaks) doesn't load the whole
+// school. Empty when endIso < startIso (e.g. a term's first morning, before
+// any of its days are complete).
 async function queryPeriodLines(
   startIso: string,
   endIso: string,
+  onlyStudentIds?: string[],
 ): Promise<PeriodAttendanceLine[]> {
   const rows: PeriodLineRow[] = await sql`
     SELECT period_line_id, compass_person_id, campus_guid, description,
@@ -284,20 +289,35 @@ async function queryPeriodLines(
            updated_timestamp
     FROM period_lines
     WHERE ${startSchoolDate()} BETWEEN ${startIso} AND ${endIso}
+    ${onlyStudentIds ? sql`AND compass_person_id = ANY(${onlyStudentIds})` : sql``}
   `
   return rows.map(toPeriodAttendanceLine)
 }
 
 // every period line in startIso..endIso (school dates, inclusive), joined to
-// its student and status — the input every percentage and status-group
-// figure is calculated from, so all reports read the data the same way.
+// its student and status — the input every figure in every report is
+// calculated from (percentages, day counts, the daily breakdown, streaks and
+// the status-group breakdown), so all of them read the data the same way.
 async function loadAssembledLines(
   startIso: string,
   endIso: string,
   ref: ReferenceData,
+  onlyStudentIds?: string[],
 ): Promise<AssembledAttendancePeriodLine[]> {
-  const lines = await queryPeriodLines(startIso, endIso)
+  const lines = await queryPeriodLines(startIso, endIso, onlyStudentIds)
   return assembleAttendanceReport(lines, ref.statuses, ref.students)
+}
+
+// a student's display name — roster names are always present for a
+// matched student, but are nullable on unmatched lines.
+function fullName(firstName: string | null, lastName: string | null): string {
+  return `${firstName ?? ''} ${lastName ?? ''}`.trim()
+}
+
+// whether a student's year level is within a report's scope
+// (ReportDefinition.yearLevels; undefined = every year level).
+function isInReportScope(def: ReportDefinition, yearLevel: string | null): boolean {
+  return !def.yearLevels || (yearLevel !== null && def.yearLevels.includes(yearLevel))
 }
 
 // a reporting period capped at the last complete school day — reports never
@@ -307,18 +327,16 @@ function completedPeriodEnd(period: Period): string {
   return lastComplete < period.end ? lastComplete : period.end
 }
 
-// the 6 numbered teaching periods a school day is built from — excludes
-// non-teaching blocks (AS/BS/L1/L2/R), which don't fit a fixed 6-column
-// layout and aren't what "6 periods of the day" refers to.
-const TEACHING_PERIOD_CODES = ['1', '2', '3', '4', '5', '6']
-
 // a day only counts as "complete" once roughly the whole school has synced
 // rolls for it — the most recent day in period_lines is often still being
 // marked in Compass and syncs with a small fraction of students (e.g. 48 of
 // ~686), which would make the breakdown table look broken for everyone else.
-// 300 is comfortably below every normal day's headcount (600+) and well
-// above a partially-synced one.
-const MIN_STUDENTS_FOR_COMPLETE_DAY = 300
+// A share of the roster rather than a fixed headcount, so it works at any
+// school size: 40% is comfortably below a normal day (Cheltenham: 600+ of
+// ~683, ~90%) and well above a partially-synced one (~7%). (This used to be
+// a fixed 300 students, which a smaller school could never reach — it would
+// silently get no daily breakdown at all.)
+const MIN_ROSTER_SHARE_FOR_COMPLETE_DAY = 0.4
 
 // most recent complete days first (descending) — the daily breakdown
 // table renders them in this order, most recent day on top. "Complete" =
@@ -332,25 +350,19 @@ async function findMostRecentCompleteDays(count: number): Promise<string[]> {
     FROM period_lines
     WHERE ${startSchoolDate()} <= ${lastCompleteSchoolDateIso()}
     GROUP BY day
-    HAVING COUNT(DISTINCT compass_person_id) >= ${MIN_STUDENTS_FOR_COMPLETE_DAY}
+    HAVING COUNT(DISTINCT compass_person_id) >=
+      ${MIN_ROSTER_SHARE_FOR_COMPLETE_DAY}::numeric * (SELECT count(*) FROM students)
     ORDER BY day DESC
     LIMIT ${count}
   `
   return rows.map((row) => row.day)
 }
 
-// fetches every period line on one school date (see startSchoolDate).
-async function queryPeriodLinesForLocalDay(
-  dateIso: string,
-): Promise<PeriodAttendanceLine[]> {
-  return await queryPeriodLines(dateIso, dateIso)
-}
-
 function classifyDailyCode(code: string | null): DailyCellKind {
   if (code === null) {
     return 'missing'
   }
-  if (code === PRESENT_STATUS_EXPORT_ID) {
+  if (isPresent(code)) {
     return 'present'
   }
   if (isReportableAbsence(code)) {
@@ -363,22 +375,16 @@ function classifyDailyCode(code: string | null): DailyCellKind {
 // covers — per stakeholder request, was 1 (just "yesterday").
 const DAILY_BREAKDOWN_DAYS = 3
 
-interface AwayStreakLineRow {
-  compass_person_id: string
-  day: string
-  period_code: string
-  prevalent_overall_status_id: string
-}
-
 // walks backward, school day by school day, from `mostRecentDay`, counting
-// how many consecutive days each candidate student was away every one of the
-// 6 teaching periods that day (same "every period flagged" test the Full Days
-// metric elsewhere uses) — stops at the first day that isn't a full absence,
-// or at the edge of AWAY_STREAK_LOOKBACK_DAYS/available school days.
+// how many consecutive days each candidate student was away for the whole
+// day (isWholeDayAbsent: every teaching period they had, flagged for this
+// report's category — the same test Full Days uses) — stops at the first
+// day that isn't, or at the edge of AWAY_STREAK_LOOKBACK_DAYS/available
+// school days.
 async function computeAwayStreaks(
   mostRecentDay: string,
   candidateIds: string[],
-  statusById: Map<string, AttendanceStatus>,
+  ref: ReferenceData,
   def: ReportDefinition,
 ): Promise<Map<string, number>> {
   if (candidateIds.length === 0) {
@@ -397,46 +403,20 @@ async function computeAwayStreaks(
   }
 
   const rangeStart = walkDays[walkDays.length - 1]
-  const rows: AwayStreakLineRow[] = await sql`
-    SELECT compass_person_id, ${startSchoolDate()}::text AS day,
-           period_code, prevalent_overall_status_id
-    FROM period_lines
-    WHERE compass_person_id = ANY(${candidateIds})
-      AND teaching_time = true
-      AND period_code = ANY(${TEACHING_PERIOD_CODES})
-      AND ${startSchoolDate()} BETWEEN ${rangeStart} AND ${mostRecentDay}
-  `
-
-  const codesByKey = new Map<string, Map<string, string | null>>()
-  for (const row of rows) {
-    const dayIso = row.day
-    const key = `${row.compass_person_id}|${dayIso}`
-    if (!codesByKey.has(key)) {
-      codesByKey.set(key, new Map())
-    }
-    const status = statusById.get(row.prevalent_overall_status_id)
-    codesByKey.get(key)!.set(
-      row.period_code,
-      status?.schoolSystemExportIdentifier ?? null,
-    )
-  }
-
-  function isFullyAway(studentId: string, day: string): boolean {
-    const periods = codesByKey.get(`${studentId}|${day}`)
-    if (!periods) {
-      return false
-    }
-    return TEACHING_PERIOD_CODES.every((code) => {
-      const exportId = periods.get(code)
-      return exportId != null && isFlaggedForCategory(def.category, exportId)
-    })
-  }
+  const lines = await loadAssembledLines(rangeStart, mostRecentDay, ref, candidateIds)
+  const linesByStudentDay = groupBy(
+    lines.filter(isTeachingPeriod),
+    (line) => `${line.compassPersonId}|${schoolDateOfInstant(line.start)}`,
+  )
+  const isFlagged = (code: string | null) => isFlaggedForCategory(def.category, code)
 
   const streaks = new Map<string, number>()
   for (const studentId of candidateIds) {
     let streak = 0
     for (const day of walkDays) {
-      if (!isFullyAway(studentId, day)) {
+      if (
+        !isWholeDayAbsent(linesByStudentDay.get(`${studentId}|${day}`) ?? [], isFlagged)
+      ) {
         break
       }
       streak++
@@ -448,24 +428,15 @@ async function computeAwayStreaks(
 
 async function buildDailyBreakdownForDay(
   day: string,
-  statusById: Map<string, AttendanceStatus>,
-  studentById: Map<string, StudentRosterEntry>,
+  ref: ReferenceData,
   def: ReportDefinition,
   computeAwayStreak: boolean,
 ): Promise<DailyBreakdownData> {
-  const lines = await queryPeriodLinesForLocalDay(day)
-
-  const teachingLines = lines.filter((line) =>
-    line.teachingTime && TEACHING_PERIOD_CODES.includes(line.periodCode)
+  const lines = await loadAssembledLines(day, day, ref)
+  const linesByStudent = groupBy(
+    lines.filter(isTeachingPeriod),
+    (line) => line.compassPersonId,
   )
-
-  const linesByStudent = new Map<string, PeriodAttendanceLine[]>()
-  for (const line of teachingLines) {
-    if (!linesByStudent.has(line.compassPersonId)) {
-      linesByStudent.set(line.compassPersonId, [])
-    }
-    linesByStudent.get(line.compassPersonId)!.push(line)
-  }
 
   const candidates: {
     compassPersonId: string
@@ -474,39 +445,28 @@ async function buildDailyBreakdownForDay(
     cells: DailyPeriodCell[]
   }[] = []
   for (const [compassPersonId, studentLines] of linesByStudent) {
-    const student = studentById.get(compassPersonId)
-    if (!student) {
-      continue
-    }
-    if (
-      def.yearLevels &&
-      (student.yearLevel === null || !def.yearLevels.includes(student.yearLevel))
-    ) {
+    const student = studentLines[0]
+    // unmatched (no roster entry) — not actionable without a name.
+    if (student.firstName === null || !isInReportScope(def, student.yearLevel)) {
       continue
     }
 
-    const linesByPeriod = new Map(studentLines.map((line) => [line.periodCode, line]))
-    const codes = TEACHING_PERIOD_CODES.map((periodCode) => {
-      const line = linesByPeriod.get(periodCode)
-      if (!line) {
-        return null
-      }
-      const status = statusById.get(line.prevalentOverallStatusId)
-      return status?.schoolSystemExportIdentifier ?? null
-    })
+    // one cell per TEACHING_PERIODS code, in timetable order; null where the
+    // student had no line for that period (rendered "N/A").
+    const lineByPeriod = new Map(studentLines.map((line) => [line.periodCode, line]))
+    const codes = TEACHING_PERIOD_CODES.map((periodCode) =>
+      lineByPeriod.get(periodCode)?.statusSchoolSystemExportIdentifier ?? null
+    )
 
     // see isFlaggedForCategory — explained reports also surface unexplained
     // periods here, per stakeholder request.
-    const hasFlaggedPeriod = codes.some((code) =>
-      isFlaggedForCategory(def.category, code)
-    )
-    if (!hasFlaggedPeriod) {
+    if (!codes.some((code) => isFlaggedForCategory(def.category, code))) {
       continue
     }
 
     candidates.push({
       compassPersonId,
-      name: `${student.firstName} ${student.lastName}`.trim(),
+      name: fullName(student.firstName, student.lastName),
       studentCode: student.studentCode,
       cells: codes.map((code) => ({ code, kind: classifyDailyCode(code) })),
     })
@@ -515,12 +475,7 @@ async function buildDailyBreakdownForDay(
   candidates.sort((a, b) => a.name.localeCompare(b.name))
 
   const streaks = computeAwayStreak
-    ? await computeAwayStreaks(
-      day,
-      candidates.map((c) => c.compassPersonId),
-      statusById,
-      def,
-    )
+    ? await computeAwayStreaks(day, candidates.map((c) => c.compassPersonId), ref, def)
     : new Map<string, number>()
 
   const rows: DailyBreakdownRow[] = candidates.map((c) => ({
@@ -530,7 +485,7 @@ async function buildDailyBreakdownForDay(
     awayStreakDays: streaks.get(c.compassPersonId) ?? 0,
   }))
 
-  return { date: day, rows }
+  return { date: day, periodLabels: TEACHING_PERIOD_CODES.map(periodLabel), rows }
 }
 
 // builds the extra table(s) (opt-in via ReportDefinition.dailyPeriodBreakdown)
@@ -554,12 +509,8 @@ export async function getDailyPeriodBreakdown(
   }
 
   const ref = await loadReferenceData()
-  const studentById = new Map(ref.students.map((s) => [s.compassPersonId, s]))
-
   const results = await Promise.all(
-    days.map((day, index) =>
-      buildDailyBreakdownForDay(day, ref.statusById, studentById, def, index === 0)
-    ),
+    days.map((day, index) => buildDailyBreakdownForDay(day, ref, def, index === 0)),
   )
 
   return results.filter((result) => result.rows.length > 0)
@@ -620,7 +571,7 @@ function toStudentAttendance(
 ): StudentAttendance {
   return {
     compassPersonId: p.compassPersonId,
-    name: `${p.firstName ?? ''} ${p.lastName ?? ''}`.trim(),
+    name: fullName(p.firstName, p.lastName),
     studentCode: p.studentCode,
     yearLevel: p.yearLevel,
     unexplained: {
@@ -717,13 +668,7 @@ export function buildReportData(
   def: ReportDefinition,
 ): AttendanceReportData {
   const threshold = def.threshold ?? DEFAULT_THRESHOLD
-  const yearLevels = def.yearLevels
-
-  const scoped = yearLevels
-    ? yearDataset.students.filter((s) =>
-      s.yearLevel !== null && yearLevels.includes(s.yearLevel)
-    )
-    : yearDataset.students
+  const scoped = yearDataset.students.filter((s) => isInReportScope(def, s.yearLevel))
 
   const termByStudent = new Map(termDataset.students.map((s) => [s.compassPersonId, s]))
 
@@ -830,19 +775,10 @@ export interface StatusGroupPeriodBreakdown {
 function bucketStatusGroupMinutes(
   lines: AssembledAttendancePeriodLine[],
 ): StatusGroupBucket[] {
-  const totalMinutes = lines.reduce((sum, l) => sum + l.expectedMinutes, 0)
-
-  const presentMinutes = lines
-    .filter((l) => l.statusSchoolSystemExportIdentifier === PRESENT_STATUS_EXPORT_ID)
-    .reduce((sum, l) => sum + l.expectedMinutes, 0)
-
+  const totalMinutes = expectedMinutesWhere(lines)
+  const presentMinutes = expectedMinutesWhere(lines, isPresent)
   const groupMinutes = STATUS_GROUPS.map((group) =>
-    lines
-      .filter((l) =>
-        l.statusSchoolSystemExportIdentifier !== null &&
-        group.has(l.statusSchoolSystemExportIdentifier)
-      )
-      .reduce((sum, l) => sum + l.expectedMinutes, 0)
+    expectedMinutesWhere(lines, (code) => isInStatusGroup(group, code))
   )
 
   // everything not Present and not in one of the curated groups above —
@@ -859,9 +795,7 @@ function bucketStatusGroupMinutes(
 
   return raw.map((b) => ({
     ...b,
-    percentage: totalMinutes === 0
-      ? null
-      : Math.round((b.minutes / totalMinutes) * 1000) / 10,
+    percentage: totalMinutes === 0 ? null : roundedPercent(b.minutes / totalMinutes),
   }))
 }
 
@@ -871,25 +805,33 @@ function buildStatusGroupScope(
 ): StatusGroupScope {
   return {
     label,
-    totalExpectedMinutes: lines.reduce((sum, l) => sum + l.expectedMinutes, 0),
+    totalExpectedMinutes: expectedMinutesWhere(lines),
     buckets: bucketStatusGroupMinutes(lines),
   }
 }
 
-// same numeric-then-alpha ordering as email-template.ts's groupByYearLevel,
-// duplicated locally rather than shared since that one is keyed off
-// AbsenceRow[], not raw period lines.
-function sortYearLevelKeys(keys: string[]): string[] {
-  return [...keys].sort((a, b) => {
-    const numericA = Number(a)
-    const numericB = Number(b)
-    if (!Number.isNaN(numericA) && !Number.isNaN(numericB)) {
-      return numericA - numericB
-    }
-    if (!Number.isNaN(numericA)) return -1
-    if (!Number.isNaN(numericB)) return 1
-    return a.localeCompare(b)
-  })
+// numeric year levels in order (7, 8, … 12), then any non-numeric ones
+// alphabetically (e.g. "Unknown").
+function compareYearLevels(a: string, b: string): number {
+  const numericA = Number(a)
+  const numericB = Number(b)
+  if (!Number.isNaN(numericA) && !Number.isNaN(numericB)) {
+    return numericA - numericB
+  }
+  if (!Number.isNaN(numericA)) return -1
+  if (!Number.isNaN(numericB)) return 1
+  return a.localeCompare(b)
+}
+
+// items grouped by year level ("Unknown" when missing), year levels in
+// compareYearLevels order, each group keeping the items' original order —
+// shared by the per-student email (rows arrive sorted by attendance %, so
+// each group stays sorted) and the status-group breakdown.
+export function groupByYearLevel<T extends { yearLevel: string | null }>(
+  items: T[],
+): Array<[string, T[]]> {
+  const groups = groupBy(items, (item) => item.yearLevel ?? 'Unknown')
+  return [...groups].sort(([a], [b]) => compareYearLevels(a, b))
 }
 
 // status-group-report.ts's single DB-fetching entry point — teaching-time
@@ -906,27 +848,18 @@ export async function getStatusGroupBreakdown(
   // does — there's no year level to attribute them to, so keeping them
   // would either inflate Whole School's denominator with unattributable
   // lines or need its own non-actionable "Unknown" table.
-  const teachingLines = assembled.filter((l) => l.teachingTime && l.firstName !== null)
-
-  const byYearLevel = new Map<string, AssembledAttendancePeriodLine[]>()
-  for (const line of teachingLines) {
-    // every remaining line is roster-matched, so yearLevel is guaranteed
-    // non-null here (see queryStudentRoster/toStudentRosterEntry) — the
-    // fallback only guards the type, it never actually fires.
-    const key = line.yearLevel ?? 'Unknown'
-    if (!byYearLevel.has(key)) {
-      byYearLevel.set(key, [])
-    }
-    byYearLevel.get(key)!.push(line)
-  }
+  const teachingLines = assembled.filter((l) =>
+    isTeachingPeriod(l) && l.firstName !== null
+  )
 
   return {
     periodName: period.name,
     periodStart: period.start,
     periodEnd: end,
     wholeSchool: buildStatusGroupScope('Whole School', teachingLines),
-    yearLevels: sortYearLevelKeys([...byYearLevel.keys()]).map((key) =>
-      buildStatusGroupScope(key, byYearLevel.get(key)!)
+    // every remaining line is roster-matched, so no "Unknown" group occurs.
+    yearLevels: groupByYearLevel(teachingLines).map(([yearLevel, lines]) =>
+      buildStatusGroupScope(yearLevel, lines)
     ),
   }
 }
