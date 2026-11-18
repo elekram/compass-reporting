@@ -203,10 +203,12 @@ lines synced for it, so a partly-marked day isn't shown.
 
 #### Mail security
 
-- `tls`: encrypted from the start, usually port 465. Prefer this where your provider
-  offers it, because denomailer's STARTTLS handling on port 587 has a known bug.
-- `starttls`: connects unencrypted, then upgrades. Usually port 587 or 25. Fails if the
-  server doesn't offer STARTTLS.
+- `tls`: encrypted from the start, usually port 465 (e.g. Gmail: `smtp.gmail.com`, port
+  465).
+- `starttls`: connects unencrypted, then upgrades. Usually port 587 or 25 (e.g. Microsoft
+  365: `smtp.office365.com`, port 587). Fails if the server doesn't offer STARTTLS. Mail
+  apps often call this "TLS" as well, so if another app says "TLS" on port 587, use
+  `starttls` here.
 - `none`: no encryption required, e.g. an internal relay on port 25. STARTTLS is still
   used if the server offers it.
 

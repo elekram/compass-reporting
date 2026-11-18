@@ -461,12 +461,9 @@ function renderSyncFailureEmail(
     </div>
   `
 
-  // plain ASCII only — denomailer's RFC 2047 encoded-word folding for
-  // non-ASCII Subject headers (an em dash, say) breaks mid-character on long
-  // subjects, and the malformed header makes some clients (Gmail included)
-  // give up parsing the whole message and show raw MIME source instead of
-  // the rendered email. See mailer.ts's toBase64Mime comment for the same
-  // denomailer-workaround pattern applied to the body.
+  // plain ASCII — a habit from denomailer, whose RFC 2047 folding of
+  // non-ASCII subjects (an em dash, say) broke the whole message in Gmail.
+  // nodemailer encodes subjects correctly, so this is no longer required.
   return { subject: `[Compass Sync] FAILED - ${currentStage}`, html }
 }
 
@@ -574,8 +571,7 @@ function renderEveningCheckEmail(
   `
 
   return {
-    // plain ASCII — see renderSyncFailureEmail's comment on the same subject
-    // -encoding bug in denomailer.
+    // plain ASCII — see renderSyncFailureEmail's comment.
     subject: closed
       ? '[Compass Sync] Evening check - discrepancy closed'
       : escalated

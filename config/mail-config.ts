@@ -21,14 +21,14 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error(`MAIL_PORT must be a valid port number in deno.env (got "${portRaw}")`)
 }
 
-// three modes rather than a true/false flag, because denomailer refuses to
-// talk to a server over an unencrypted connection at all — even with no login
-// — unless explicitly told to allow it:
-//   tls      — implicit TLS from the first byte (typically port 465). Gmail
-//              uses this here: denomailer's STARTTLS negotiation on 587 has a
-//              known bug, so prefer it where the provider offers it.
-//   starttls — plain connect, then upgrade via STARTTLS (typically 587 or
-//              25). Fails if the server doesn't offer STARTTLS.
+// three modes rather than a true/false flag, since "not implicit TLS" can
+// mean either "must upgrade" or "encryption optional" (see mailer.ts's
+// securityOptions for how each maps onto nodemailer):
+//   tls      — implicit TLS from the first byte (typically port 465, e.g.
+//              Gmail).
+//   starttls — plain connect, then upgrade via STARTTLS (typically 587, e.g.
+//              Microsoft 365's smtp.office365.com). Fails if the server
+//              doesn't offer STARTTLS. Mail apps often label this "TLS" too.
 //   none     — no encryption required (typically an internal relay on port
 //              25). STARTTLS is still used if the server happens to offer it.
 // parsed strictly, same as CRON_DEBUG_MODE — a typo must not silently fall
